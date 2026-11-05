@@ -431,6 +431,25 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(saved['model']['status'], 'not_started')
         self.assertEqual(saved['failure']['code'], 'ORDER_NOT_REVIEWABLE')
 
+    def test_cli_warns_order_may_exist_after_rejected_readback(self):
+        transport = FakeTransport([self.token_response(),
+            HttpResponse(201, json.dumps(order_body()).encode(), DEBUG_ID),
+            HttpResponse(200, json.dumps(order_body(status='APPROVED')).encode(), DEBUG_ID)])
+        client = StubClient()
+        client.preflight = lambda: {'fixture': True}
+        output = StringIO()
+        with patch('app._make_client', return_value=client), \
+             patch('judge_sandbox_flow.UrllibSandboxTransport', return_value=transport), \
+             patch('judge_sandbox_flow.load_owner_sandbox_credentials', return_value=self.creds), \
+             patch('builtins.input', side_effect=['Has my payment gone through?',
+                 'CREATE ONE USD 10 SANDBOX ORDER']), redirect_stdout(output):
+            code = main(['--run', '--reviewer-order-pin', str(self.pin),
+                         '--journal', str(self.journal)])
+        self.assertEqual(code, 2)
+        self.assertIn('order may have been created', output.getvalue())
+        self.assertNotIn('No external action occurred', output.getvalue())
+        self.assertEqual(self.journal_data()['state'], 'readback_rejected')
+
     def test_transport_preserves_only_validated_paypal_debug_header(self):
         class Response:
             status = 200

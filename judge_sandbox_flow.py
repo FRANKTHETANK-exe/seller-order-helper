@@ -453,7 +453,7 @@ def main(argv=None):
         if policy is not None:
             policy.close()
     if result['state'] != 'draft_pending_human_review':
-        print('No draft was generated. No external action occurred; inspect the private attempt record.')
+        print('No draft was generated. A Sandbox order may have been created; preserve and inspect the private attempt record before taking further action.')
         return 2
     print('Sandbox order read and local Granite draft are complete.')
     print('Order status: CREATED; payment truth: CREATED_NOT_APPROVED; no capture or send occurred.')

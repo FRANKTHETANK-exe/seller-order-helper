@@ -1,0 +1,18 @@
+{
+  "schema": "one-sandbox-orders-v2-create-read-once-v1",
+  "synthetic": true,
+  "environment": "PayPal sandbox only",
+  "state": "created_and_read",
+  "requestId": "REDACTED_SANDBOX_REQUEST_ID",
+  "orderId": "REDACTEDORDERID",
+  "postCount": 1,
+  "getCount": 1,
+  "postHttpStatus": 201,
+  "getHttpStatus": 200,
+  "identityMatched": true,
+  "fixedAmountMatched": true,
+  "capturePresent": false,
+  "orderStatus": "CREATED",
+  "getOrderStatus": "CREATED",
+  "createdAt": "2026-01-01T00:00:00Z"
+}

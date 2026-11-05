@@ -1,0 +1,23 @@
+{
+  "id": "SIM-ORDER-PENDING",
+  "status": "APPROVED",
+  "intent": "CAPTURE",
+  "purchase_units": [
+    {
+      "reference_id": "demo-notebook",
+      "payee": { "merchant_id": "DEMO_SELLER" },
+      "amount": { "currency_code": "USD", "value": "10.00" },
+      "items": [
+        {
+          "name": "Demo notebook",
+          "sku": "demo-notebook",
+          "quantity": "1",
+          "unit_amount": { "currency_code": "USD", "value": "10.00" }
+        }
+      ]
+    }
+  ],
+  "links": [
+    { "href": "https://example.invalid/approval", "rel": "approve", "method": "GET" }
+  ]
+}

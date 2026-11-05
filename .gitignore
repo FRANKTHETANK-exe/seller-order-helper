@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.env
+.env*
+.secondbrain-secrets/
+*.db
+*.sqlite*
+*.lock
+data/private-*
+evidence/private-*
+evidence/*runtime*
+evidence/*journal*
+evidence/*order-pin*
+guard-evidence.json
+private/
+*.zip
+.DS_Store

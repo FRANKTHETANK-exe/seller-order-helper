@@ -1,0 +1,30 @@
+{
+  "id": "TESTORDER123",
+  "status": "CREATED",
+  "purchase_units": [
+    {
+      "reference_id": "widget-1",
+      "amount": {
+        "currency_code": "USD",
+        "value": "10.00",
+        "breakdown": {
+          "item_total": {
+            "currency_code": "USD",
+            "value": "10.00"
+          }
+        }
+      },
+      "items": [
+        {
+          "name": "Widget",
+          "sku": "widget-1",
+          "quantity": "1",
+          "unit_amount": {
+            "currency_code": "USD",
+            "value": "10.00"
+          }
+        }
+      ]
+    }
+  ]
+}

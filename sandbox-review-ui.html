@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Sandbox order review · Seller Order Helper</title>
+  <style>
+    :root { color-scheme: light; --ink:#202625; --muted:#5c6764; --line:#d6ded9; --paper:#f6f7f3; --card:#fff; --green:#245a46; --amber:#8a4d11; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif }
+    main { width:min(100% - 32px, 760px); margin:36px auto 64px }
+    .eyebrow { text-transform:uppercase; letter-spacing:.1em; font-size:.75rem; font-weight:700; color:var(--green) }
+    h1 { margin:.25rem 0; font:600 clamp(1.8rem,5vw,2.55rem)/1.15 Georgia,serif; letter-spacing:-.025em }
+    .intro { max-width:62ch; color:var(--muted); margin:.6rem 0 1.5rem }
+    .notice { border:1px solid #d6b686; border-left:4px solid var(--amber); background:#fff8eb; padding:12px 16px; border-radius:4px; margin:18px 0 }
+    .notice strong { color:#683806 }
+    .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:20px; margin:14px 0 }
+    h2 { font-size:1.08rem; margin:0 0 12px }
+    dl { display:grid; grid-template-columns:minmax(130px, .65fr) 1fr; gap:7px 18px; margin:0 }
+    dt { color:var(--muted) } dd { margin:0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums }
+    .tag { display:inline-block; border:1px solid #bfd2c8; background:#edf5f0; color:#194a36; padding:2px 8px; border-radius:100px; font-size:.82rem; font-weight:650 }
+    .draft { min-height:96px; padding:16px; border:1px solid var(--line); background:#fbfcf9; border-radius:5px; white-space:pre-wrap }
+    textarea { display:block; width:100%; min-height:90px; margin:8px 0 4px; padding:10px; border:1px solid var(--line); border-radius:5px; color:var(--ink); font:inherit }
+    .digest { font: .78rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; color:var(--muted) }
+    button { appearance:none; border:1px solid var(--green); border-radius:5px; background:var(--green); color:white; padding:10px 15px; font:inherit; font-weight:600; cursor:pointer }
+    button.secondary { background:white; color:var(--green) }
+    button:disabled { opacity:.5; cursor:not-allowed }
+    button:focus-visible { outline:3px solid #d08b34; outline-offset:3px }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px }
+    .muted { color:var(--muted); font-size:.92rem }
+    #status { min-height:1.6em; color:var(--green); font-weight:600 }
+    .foot { border-top:1px solid var(--line); margin-top:24px; padding-top:16px; color:var(--muted); font-size:.9rem }
+    @media (max-width:520px) { main { margin-top:22px } .panel { padding:16px } dl { grid-template-columns:1fr; gap:1px } dd { margin:0 0 8px } .actions button { width:100% } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Seller Order Helper · private local review</p>
+  <h1>Sandbox order review</h1>
+  <p class="intro" id="model-intro">This page shows saved sandbox evidence. It cannot contact PayPal or send anything.</p>
+  <div class="notice" id="admission-scope" hidden><strong>Standalone guard limits.</strong> This setup checks only the local Ollama model and computer resources; it does not inspect Second Brain or other task queues. Use only on a computer you have confirmed is idle for AI work.</div>
+  <section class="panel" id="live-refresh-panel" aria-labelledby="refresh-title" hidden>
+    <h2 id="refresh-title">One-time PayPal sandbox refresh</h2>
+    <p class="muted">The saved receipt is historical. Refresh reads only the existing order in the reviewer-owned Sandbox pin. Credentials stay on this computer; this page has no create, approve, capture, or send action. Draft generation stays disabled until the read passes validation.</p>
+    <div class="actions"><button id="refresh" type="button">Refresh pinned sandbox order</button></div>
+    <p id="refresh-state" class="muted" role="status" aria-live="polite">No live read has been requested.</p>
+  </section>
+  <div class="notice"><strong>Payment is not confirmed by this view.</strong> The displayed order status is CREATED. The available facts do not show buyer approval or a captured payment.</div>
+
+  <section class="panel" aria-labelledby="facts-title">
+    <h2 id="facts-title">Recorded order facts</h2>
+    <dl>
+      <dt>Order</dt><dd id="order-id">Loading…</dd>
+      <dt>Environment</dt><dd id="environment">Loading…</dd>
+      <dt>Order status</dt><dd><span class="tag" id="order-status">Loading…</span></dd>
+      <dt>Payment truth</dt><dd id="payment-truth">Loading…</dd>
+      <dt>Capture</dt><dd id="capture-status">Loading…</dd>
+      <dt>Amount</dt><dd id="amount">Loading…</dd>
+      <dt>Evidence</dt><dd id="source">Loading…</dd>
+      <dt id="time-label">Observed</dt><dd id="observed-at">Loading…</dd>
+    </dl>
+    <p class="muted" id="facts-source-note">This is a saved receipt snapshot. Refreshing it from PayPal is not available from this page.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="draft-title">
+    <h2 id="draft-title">Internal Sandbox review draft</h2>
+    <p class="muted">This is an internal test draft. Do not send it to a buyer.</p>
+    <label for="buyer-question">Buyer question (use synthetic demo text)</label>
+    <textarea id="buyer-question" maxlength="500" aria-describedby="question-hint">Has my payment gone through?</textarea>
+    <p class="muted" id="question-hint">Up to 500 characters. A local model may classify the question into a fixed intent; the app writes the response from validated facts or synthetic example data. The question and draft stay in this local session.</p>
+    <p class="muted" id="question-intent" aria-live="polite"></p>
+    <p id="draft" class="draft" aria-live="polite">No draft generated yet.</p>
+    <p class="muted" id="model-info">No model has been run.</p>
+    <p class="muted" id="granite-diagnostic" role="status" aria-live="polite"></p>
+    <p class="digest" id="digest"></p>
+    <p id="review-state" class="muted">Human review is pending. Nothing has been sent.</p>
+    <div class="actions">
+      <button id="generate" type="button" disabled>Generate local draft</button>
+      <button id="review" class="secondary" type="button" disabled>I reviewed this exact draft</button>
+    </div>
+    <p id="status" role="status" aria-live="polite">Loading local session facts…</p>
+    <button id="reload-state" class="secondary" type="button">Reload session status</button>
+    <p class="muted">Reload checks this local session only. It does not repeat an order read, generate a draft, or send anything. If the server closed, its in-memory review state is unavailable.</p>
+  </section>
+
+  <footer class="foot" id="model-footer">The draft uses only the saved receipt facts. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.</footer>
+</main>
+<script>
+(() => {
+  const byId = id => document.getElementById(id);
+  const put = (id, value) => { byId(id).textContent = value; };
+  const status = text => put('status', text);
+  let current = null;
+  function lockActions() {
+    ['generate', 'review', 'refresh'].forEach(id => { byId(id).disabled = true; });
+    byId('buyer-question').disabled = true;
+    byId('reload-state').disabled = true;
+  }
+  async function reloadState() {
+    lockActions();
+    byId('reload-state').disabled = true;
+    try {
+      const response = await fetch('/api/state', {cache:'no-store'});
+      if (!response.ok) throw new Error('state unavailable');
+      render(await response.json());
+      return true;
+    } catch (_) {
+      lockActions();
+      status('Session status is unavailable. Actions are locked; reload session status before continuing. No operation was repeated.');
+      return false;
+    } finally { byId('reload-state').disabled = false; }
+  }
+  async function reconcileFailure(error) {
+    if (await reloadState()) status(`${error.message} Session status reloaded; inspect it before continuing. No operation was repeated.`);
+  }
+  async function call(path, data) {
+    const response = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'The local request was stopped.');
+    return result;
+  }
+  function render(state) {
+    current = state;
+    byId('reload-state').disabled = false;
+    byId('admission-scope').hidden = !state.standalone_demo;
+    byId('live-refresh-panel').hidden = !state.live_refresh_enabled;
+    put('order-id', state.order_id);
+    put('environment', state.source === 'synthetic_order_fixture' ? 'Synthetic PayPal-style example' : 'PayPal sandbox');
+    put('time-label', state.source === 'synthetic_order_fixture' ? 'Example time' : 'Observed');
+    put('order-status', state.order_status);
+    put('payment-truth', state.payment_truth);
+    put('capture-status', state.capture_status || 'None recorded');
+    put('amount', `${state.currency} ${state.amount}`);
+    put('source', state.source === 'synthetic_order_fixture' ? 'Synthetic offline example' : state.source === 'saved_paypal_sandbox_receipt' ? 'Saved PayPal sandbox receipt' : 'Live sandbox read');
+    put('observed-at', state.observed_at);
+    if (state.live_refresh_enabled) {
+      const readState = state.live_refresh_status;
+      byId('refresh').disabled = readState !== 'not_requested';
+      if (readState === 'succeeded' && state.live_facts_fresh) {
+        put('refresh-state', `Live order read and validated at ${state.observed_at}. Generate is available for up to five minutes.`);
+        put('facts-source-note', 'These facts came from one read-only PayPal sandbox lookup of the known order. The timestamp is the read observation time.');
+      } else if (readState === 'failed') {
+        const failure = state.live_refresh_failure || {};
+        const counts = failure.call_counts || state.live_refresh_call_counts;
+        const calls = counts
+          ? ` OAuth attempts: ${counts.oauth_attempts}; pinned-order GET attempts: ${counts.pinned_order_get_attempts}.`
+          : ' Safe request counts are unavailable.';
+        const status = Number.isInteger(failure.http_status) ? ` HTTP ${failure.http_status}.` : '';
+        put('refresh-state', `Refresh stopped (${failure.stage || 'live_read'} · ${failure.code || 'LIVE_READ_REJECTED'}).${status}${calls} No AI draft is available.`);
+        put('facts-source-note', state.source === 'synthetic_order_fixture' ? 'The live read did not validate. These displayed facts are synthetic example data, not current order state.' : 'The live read did not validate. These displayed facts are historical, not current order state.');
+      } else if (readState === 'stale') {
+        put('refresh-state', 'The live read is older than five minutes. Restart this session for a new one-time read; no draft can be generated from stale facts.');
+        put('facts-source-note', 'This live read is stale; do not treat it as current.');
+      } else {
+        put('refresh-state', 'No live read yet. Draft generation is locked until the pinned-order read succeeds.');
+        put('facts-source-note', state.source === 'synthetic_order_fixture' ? 'These displayed facts are synthetic example data until a successful live read replaces them.' : 'These displayed facts are historical until a successful live read replaces them.');
+      }
+    } else if (state.source === 'synthetic_order_fixture') {
+      put('facts-source-note', 'This is synthetic example data. No PayPal order was read for this offline session.');
+    }
+    const draft = state.draft;
+    put('draft', draft ? draft.text : 'No draft generated yet.');
+    put('digest', draft ? `Draft digest: ${draft.digest}` : '');
+    const intentLabels = {payment_status:'payment status',approval_needed:'approval requirement',delivery_status:'delivery status',refund_question:'refund question',human_follow_up:'needs human follow-up'};
+    put('question-intent', draft ? `Question interpreted as: ${intentLabels[draft.question_intent] || 'needs human follow-up'}.` : '');
+    const stubMode = state.client_kind === 'stub';
+    const graniteMode = state.client_kind === 'granite';
+    const liveMode = state.live_refresh_enabled;
+    const staleLiveRead = liveMode && state.live_refresh_status === 'stale'
+      && state.source !== 'saved_paypal_sandbox_receipt';
+    if (stubMode) {
+      put('model-info', state.generation_attempted
+        ? 'Offline template · no AI inference · draft generated'
+        : 'Offline template · no AI inference · not run yet');
+      put('model-intro', liveMode
+        ? (staleLiveRead
+          ? 'A fixed-template draft, if present, came from an earlier validated Sandbox read that is now stale. Treat it as historical evidence; no new draft or review is available in this session. This page cannot change or send anything.'
+          : state.live_facts_fresh
+          ? 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the validated Sandbox read shown above. The read is historical after five minutes. This page cannot change or send anything.'
+          : 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the saved receipt unless a fresh Sandbox read is shown above. This page cannot change or send anything.')
+        : state.source === 'synthetic_order_fixture'
+          ? 'This offline example uses synthetic order facts and fixed wording, not AI or a PayPal lookup. Review acknowledgment lasts only until this local server closes. This page cannot send anything.'
+          : 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the saved receipt. Review acknowledgment lasts only until this local server closes. This page cannot contact PayPal or send anything.');
+      put('model-footer', liveMode
+        ? 'Offline template mode can use a validated one-time read of the pinned Sandbox order, but runs no model. The page offers no order creation, approval, capture, fulfillment, or message-send controls.'
+        : 'Offline template mode runs no model and makes no PayPal request. Review acknowledgment lasts only until this local server closes. The page offers no approval, capture, fulfillment, or message-send controls.');
+    } else if (graniteMode) {
+      put('model-info', state.draft
+        ? `Granite local inference used · ${state.model_name} · one attempt for this session`
+        : (state.generation_attempted
+          ? `Granite selected · ${state.model_name} · attempt stopped without a draft`
+          : `Granite selected · ${state.model_name} · no inference run yet`));
+      put('model-intro', liveMode
+        ? (staleLiveRead
+          ? (state.draft
+            ? 'A bounded Granite inference produced this draft from an earlier validated pinned-order read that is now stale. Treat it as historical evidence; review is disabled. This page cannot change or send anything.'
+            : 'An earlier validated pinned-order read is now stale. No Granite draft can be generated from it in this session. This page cannot change or send anything.')
+          : state.draft
+          ? 'A bounded Granite inference has produced this draft from the validated pinned-order read. Inspect it and record review of that exact draft. This page can read that known sandbox order but cannot change or send anything.'
+          : 'Granite is selected. In live-refresh mode, the saved receipt is historical until the pinned-order read passes validation. After generation, inspect the draft and record review of that exact draft. The page cannot change or send anything.')
+        : (state.source === 'synthetic_order_fixture'
+          ? 'This offline example uses synthetic order facts. Granite may select constrained wording, but no PayPal lookup or message send is available.'
+          : state.draft
+          ? 'A bounded Granite inference has produced this draft from the saved sandbox evidence. Inspect it and record review of that exact draft. This page cannot contact PayPal or send anything.'
+          : 'Granite is selected for this local session. No inference has run yet. After generation, inspect the draft and record review of that exact draft. This page cannot contact PayPal or send anything.'));
+      put('model-footer', liveMode
+        ? 'Granite selects an allowed wording style; the app composes the factual sentence only from the validated pinned-order read and its observed timestamp. The only order-data request is one read-only GET of that known order. Review acknowledgment lasts only until this server closes; there are no order creation, approval, capture, fulfillment, or message-send controls.'
+        : (state.draft
+          ? 'Granite selects an allowed wording style; the app composes the factual sentence only from the saved receipt. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.'
+          : 'If generated, Granite selects only an allowed wording style and the app composes the factual sentence from saved receipt facts. No model execution is claimed until a draft appears. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.'));
+    } else {
+      put('model-info', 'Model status unavailable; no inference claim is made.');
+      put('model-intro', 'Model status is unavailable. This page shows saved sandbox evidence only and cannot contact PayPal or send anything.');
+      put('model-footer', 'Model execution is unverified; no inference claim is made. The page cannot approve, capture, fulfill, or send messages.');
+    }
+    const diagnostic = state.generation_failure;
+    if (diagnostic) {
+      const attempted = diagnostic.request_attempted === null ? 'unknown'
+        : diagnostic.request_attempted ? 'yes' : 'no';
+      const count = diagnostic.attempt_count === null ? 'unknown' : diagnostic.attempt_count;
+      const http = Number.isInteger(diagnostic.http_status) ? ` · HTTP ${diagnostic.http_status}` : '';
+      put('granite-diagnostic', `Granite stopped · ${diagnostic.stage} / ${diagnostic.code} · request attempted: ${attempted} · count: ${count}${http}. No retry was made.`);
+    } else {
+      put('granite-diagnostic', '');
+    }
+    put('review-state', state.review_status === 'reviewed_not_sent'
+      ? 'Reviewed in this local session. Not sent; payment remains CREATED_NOT_APPROVED.'
+      : (draft ? 'Human review pending. This draft is not sent.' : 'Human review is pending. Nothing has been sent.'));
+    const liveReady = !state.live_refresh_enabled
+      || (state.live_refresh_status === 'succeeded' && state.live_facts_fresh);
+    byId('buyer-question').disabled = !!state.generation_attempted;
+    byId('generate').disabled = state.generation_attempted || !liveReady;
+    byId('review').disabled = !draft || state.review_status === 'reviewed_not_sent' || !liveReady;
+  }
+  byId('reload-state').addEventListener('click', async () => {
+    status('Checking this local session only…');
+    if (await reloadState()) status('Session status reloaded. No order read, draft generation, or message was repeated.');
+  });
+  byId('refresh').addEventListener('click', async () => {
+    lockActions();
+    put('refresh-state', 'Reading the one known PayPal sandbox order…');
+    try {
+      render(await call('/api/refresh', {}));
+      status('Sandbox read passed validation.');
+    } catch (error) { await reconcileFailure(error); }
+  });
+  byId('generate').addEventListener('click', async () => {
+    const question = byId('buyer-question').value;
+    lockActions();
+    status('Generating one bounded local draft…');
+    try { render(await call('/api/generate', {question})); status('Draft ready for inspection.'); }
+    catch (error) { await reconcileFailure(error); }
+  });
+  byId('review').addEventListener('click', async () => {
+    if (!current || !current.draft) return;
+    const digest = current.draft.digest;
+    lockActions();
+    try { render(await call('/api/review', {digest})); status('Review recorded locally. Nothing was sent.'); }
+    catch (error) { await reconcileFailure(error); }
+  });
+  lockActions();
+  reloadState();
+})();
+</script>
+</body>
+</html>

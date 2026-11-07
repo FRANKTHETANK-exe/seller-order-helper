@@ -353,7 +353,7 @@ class SandboxAIReviewTests(unittest.TestCase):
         self.assertIn('Buyer question (use synthetic demo text)', page)
         self.assertIn('Question interpreted as:', page)
         self.assertIn("call('/api/generate', {question})", page)
-        self.assertIn('Credentials stay on this computer', page)
+        self.assertIn('Sandbox credentials are sent to PayPal for authentication', page)
         self.assertIn('Generate is available for up to five minutes.', page)
         self.assertIn('The only order-data request is one read-only GET of that known order.', page)
         self.assertNotIn('stub · stub', page)

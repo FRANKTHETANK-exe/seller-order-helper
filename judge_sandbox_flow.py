@@ -423,7 +423,7 @@ def main(argv=None):
         parser.error('pin and journal must be distinct absolute paths')
     if args.standalone and (args.resource_proof is not None or args.stable_swap_baseline):
         parser.error('--standalone cannot use controller proof or the owner swap exception')
-    from app import _make_client, _confirm_standalone_demo
+    from app import _make_client, _confirm_standalone_demo, _check_startup_lock
     import runtime_guard
     original_proof = runtime_guard.INSPECTED_STALE_PROOF
     policy = None
@@ -456,6 +456,7 @@ def main(argv=None):
             if not _confirm_standalone_demo(client):
                 return 2
         else:
+            _check_startup_lock(client)
             client.preflight()  # prompts finished; baseline is fresh before OAuth
         result = run_once(transport=UrllibSandboxTransport(), credentials=load_owner_sandbox_credentials,
             granite_client=client, question=question, pin_path=args.reviewer_order_pin, journal_path=args.journal,

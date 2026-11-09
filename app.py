@@ -391,6 +391,34 @@ def _make_client(name, *, standalone_demo=False, stable_swap_policy=None):
         raise AppError('Local client is unavailable or held; no automatic retry.') from None
 
 
+def _check_startup_lock(client):
+    # Real Granite startup only; preserve the injected-client preflight protocol.
+    from local_model import GraniteClient
+    if isinstance(client, GraniteClient):
+        client.check_startup_lock()
+
+
+def _standalone_preflight_remedy(error):
+    """Use only fixed codes/remedies; never render exception text or paths."""
+    remedies = {
+        'ADMISSION_LOCK_FAILED': 'Use an owned, writable checkout with an unlinked data directory and model lock. Wait for any other local run to finish. Do not delete locks or attempt records.',
+        'ADMISSION_CHECK_FAILED': 'Check that local Ollama is running at http://127.0.0.1:11434 and responds normally. See README requirements; no service was started.',
+        'MODEL_TAG_LOOKUP_FAILED': 'Check that local Ollama is responding normally. See README requirements; no download was attempted.',
+        'MODEL_TAG_UNAVAILABLE': 'Cache the required granite4.2:3b model using the official Ollama setup in README before starting a new attempt.',
+        'MODEL_DIGEST_UNAVAILABLE': 'Inspect the cached granite4.2:3b model using the official Ollama setup in README; its required digest could not be verified.',
+        'MODEL_DIGEST_MISMATCH': 'The cached model differs from the pinned digest in README. Resolve the model version locally; do not bypass the digest check.',
+        'MODEL_PLATFORM_UNSUPPORTED': 'Use supported macOS or compatible native Linux as described in README.',
+        'MODEL_SETUP_ERROR': 'Review the local setup and resource requirements in README. No automatic retry or guard bypass is available.',
+    }
+    resource_remedy = 'Stop other local model or heavy work, then review memory, swap, disk and CPU requirements in README. Do not weaken resource guards.'
+    for code in ('RESOURCE_ADMISSION_DENIED', 'SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
+        remedies[code] = resource_remedy
+    code = getattr(error, 'failure_code', None)
+    if type(code) is not str or code not in remedies:
+        code = 'MODEL_SETUP_ERROR'
+    return code + ': ' + remedies[code]
+
+
 def _confirm_standalone_demo(client):
     """Operator confirms isolation because portable mode cannot inspect task queues."""
     if not getattr(client, 'standalone_demo', False):
@@ -410,9 +438,11 @@ def _confirm_standalone_demo(client):
         print('Standalone inference not started; no model request or external action occurred.')
         return False
     try:
+        _check_startup_lock(client)
         checked = client.preflight()
-    except Exception:
+    except Exception as error:
         print('Standalone preflight held; no model request or external action occurred.')
+        print(_standalone_preflight_remedy(error))
         return False
     resources = checked['resources']
     print('Standalone preflight passed: ' + checked['cached_models'][0] +

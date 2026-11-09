@@ -4,7 +4,9 @@ from __future__ import annotations
 import sys
 import json
 import math
+import os
 from pathlib import Path
+import stat
 import time
 from uuid import uuid4
 
@@ -196,6 +198,38 @@ class GraniteClient:
             return False
         self._standalone_attested_until = time.monotonic() + 600
         return True
+
+    def check_startup_lock(self):
+        """Check local lock readiness, then release it; this reserves no capacity."""
+        parent_fd = lock_fd = None
+        try:
+            # Open the data directory and lock without following a link. Never
+            # delete a lock or repair permissions to make admission succeed.
+            parent_fd = os.open(self.lock_path.parent,
+                                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                info = os.stat(self.lock_path.name, dir_fd=parent_fd,
+                               follow_symlinks=False)
+            except FileNotFoundError:
+                info = None
+            if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+                raise OSError('unusable lock')
+            lock_fd = os.open(self.lock_path.name,
+                              os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                              0o600, dir_fd=parent_fd)
+            opened = os.fstat(lock_fd)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise OSError('unusable lock')
+            self._lock_module.flock(lock_fd,
+                                   self._lock_module.LOCK_EX | self._lock_module.LOCK_NB)
+        except (OSError, ValueError):
+            raise LocalModelHeld('Local model admission lock is unavailable',
+                                 stage='admission', failure_code='ADMISSION_LOCK_FAILED') from None
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)
+            if parent_fd is not None:
+                os.close(parent_fd)
 
     def preflight(self):
         if self.standalone_demo:

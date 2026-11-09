@@ -387,14 +387,31 @@ def inspect_standalone(expected_digests):
             or any(not isinstance(v, str) or not re.fullmatch(r'[a-f0-9]{64}', v)
                    for v in expected_digests.values())):
         raise PilotStop('expected model digest contract is invalid')
-    version = get_json('/api/version')
+    try:
+        version = get_json('/api/version')
+    except Exception:
+        raise PilotStop('local model runtime lookup failed', stage='admission',
+                        failure_code='ADMISSION_CHECK_FAILED') from None
     try:
         tags = get_json('/api/tags')
     except Exception:
         raise PilotStop('model tag lookup failed', stage='tag_lookup',
                         failure_code='MODEL_TAG_LOOKUP_FAILED') from None
-    loaded = get_json('/api/ps')
-    snapshot = local_resources()
+    try:
+        loaded = get_json('/api/ps')
+    except Exception:
+        raise PilotStop('local model runtime lookup failed', stage='admission',
+                        failure_code='ADMISSION_CHECK_FAILED') from None
+    try:
+        snapshot = local_resources()
+    except PilotStop as error:
+        if error.failure_code in ('SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
+            raise
+        raise PilotStop('local resource admission could not be verified', stage='resource_guard',
+                        failure_code='RESOURCE_ADMISSION_DENIED') from None
+    except Exception:
+        raise PilotStop('local resource admission could not be verified', stage='resource_guard',
+                        failure_code='RESOURCE_ADMISSION_DENIED') from None
     installed = {x.get('name'): x.get('digest') for x in tags.get('models', [])}
     for model in MODELS:
         if model not in installed:

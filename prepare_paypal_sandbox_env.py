@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import warnings
 
 from private_file_support import supports_private_files
 
@@ -78,9 +79,16 @@ def main() -> int:
         return 2
     try:
         _verify_parent(TARGET.parent)
-        client_id = getpass.getpass("PayPal sandbox client ID (hidden): ")
-        client_secret = getpass.getpass("PayPal sandbox client secret (hidden): ")
+        # getpass otherwise warns and falls back to echoed input when terminal
+        # echo control fails. Abort at the warning, before that fallback reads.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            client_id = getpass.getpass("PayPal sandbox client ID (hidden): ")
+            client_secret = getpass.getpass("PayPal sandbox client secret (hidden): ")
         create_env_file(TARGET, client_id, client_secret)
+    except getpass.GetPassWarning:
+        print("Not written: hidden input is unavailable. Use a private local terminal with working echo control; no credential file was written.", file=sys.stderr)
+        return 1
     except (SetupError, OSError, EOFError, KeyboardInterrupt):
         print("Not written: secure setup did not complete. No credential value was displayed.", file=sys.stderr)
         return 1

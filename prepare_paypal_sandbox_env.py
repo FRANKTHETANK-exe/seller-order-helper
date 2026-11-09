@@ -14,6 +14,8 @@ from pathlib import Path
 import stat
 import sys
 
+from private_file_support import supports_private_files
+
 
 TARGET = Path.home() / ".secondbrain-secrets" / "paypal-sandbox.env"
 KEYS = ("PAYPAL_SANDBOX_CLIENT_ID", "PAYPAL_SANDBOX_CLIENT_SECRET")
@@ -24,6 +26,8 @@ class SetupError(Exception):
 
 
 def _verify_parent(parent: Path) -> None:
+    if not supports_private_files():
+        raise SetupError("private Sandbox credential setup requires supported POSIX ownership and permissions")
     info = parent.lstat()
     if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
         raise SetupError("credential directory is not a real directory")

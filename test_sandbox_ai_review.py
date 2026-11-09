@@ -26,9 +26,10 @@ class SandboxAIReviewTests(unittest.TestCase):
         self.assertEqual(suggestion.question_intent, 'payment_status')
         self.assertTrue(suggestion.human_review_required)
         self.assertFalse(suggestion.sent)
-        self.assertIn('CREATED', suggestion.review_text)
-        self.assertTrue(suggestion.review_text.startswith('Internal Sandbox review draft — not for buyer delivery. '))
-        self.assertIn('offline synthetic fixture dated', suggestion.review_text)
+        self.assertIn('marked Created', suggestion.review_text)
+        self.assertTrue(suggestion.human_review_required)
+        self.assertIn('sample $10.00 order', suggestion.review_text)
+        self.assertEqual(suggestion.observed_at, self.facts.observed_at)
         self.assertIn('example data, not a PayPal lookup', suggestion.review_text)
         self.assertNotIn('order ' + self.facts.order_id + ' is CREATED', suggestion.review_text)
         self.assertIn('does not show buyer approval or captured payment', suggestion.review_text)
@@ -38,17 +39,17 @@ class SandboxAIReviewTests(unittest.TestCase):
     def test_question_intents_produce_only_deterministic_fact_grounded_answers(self):
         cases = [
             ('Has my payment gone through?', 'payment_status', 'does not show buyer approval'),
-            ('Do I need to approve this?', 'approval_needed', 'must check whether buyer approval is needed'),
+            ('Do I need to approve this?', 'approval_needed', 'does not tell us whether another approval step is needed'),
             ('Where is my tracking?', 'delivery_status', 'does not establish shipping or delivery status'),
             ('Can I get a refund?', 'refund_question', 'does not establish refund status'),
-            ('Please help with this issue.', 'human_follow_up', 'must review this question'),
+            ('Please help with this issue.', 'human_follow_up', 'cannot answer the rest of the question'),
         ]
         for question, intent, expected in cases:
             with self.subTest(intent=intent):
                 client = StubClient(style_id='concise')
                 suggestion = generate_sandbox_review(self.facts, client, question)
                 self.assertEqual(suggestion.question_intent, intent)
-                self.assertIn(self.facts.observed_at, suggestion.review_text)
+                self.assertEqual(suggestion.observed_at, self.facts.observed_at)
                 self.assertIn('example data, not a PayPal lookup', suggestion.review_text)
                 self.assertNotIn('CREATED_NOT_APPROVED', suggestion.review_text)
                 self.assertIn(expected, suggestion.review_text)
@@ -243,7 +244,7 @@ class SandboxAIReviewTests(unittest.TestCase):
         self.assertEqual(state['live_refresh_call_counts'],
                          {'oauth_attempts': 1, 'pinned_order_get_attempts': 1})
         self.assertNotIn('safe fixture rejection', json.dumps(state))
-        with self.assertRaisesRegex(ReviewUIError, 'no AI draft'):
+        with self.assertRaisesRegex(ReviewUIError, 'order check failed'):
             session.generate()
         self.assertEqual(getattr(client, 'calls', 0), 0)
         with self.assertRaisesRegex(ReviewUIError, 'one sandbox refresh attempt'):
@@ -320,45 +321,45 @@ class SandboxAIReviewTests(unittest.TestCase):
         self.assertIs(serve.call_args.kwargs['refresh_known_order'], pinned_reader)
         self.assertEqual(serve.call_args.kwargs['port'], 0)
 
-    def test_browser_marks_standalone_queue_visibility_as_unchecked(self):
+    def test_runtime_queue_metadata_remains_in_api_but_not_seller_page(self):
         class StandaloneStub(StubClient):
             standalone_demo = True
         state = ReviewSession(StandaloneStub()).state()
         self.assertTrue(state['standalone_demo'])
         self.assertEqual(state['controller_queue_visibility'], 'not_checked_standalone_mode')
         page = __import__('pathlib').Path(__file__).with_name('sandbox-review-ui.html').read_text()
-        self.assertIn('Standalone guard limits', page)
-        self.assertIn('does not inspect Second Brain or other task queues', page)
+        self.assertNotIn('Check that this computer is idle', page)
+        self.assertNotIn('Second Brain', page)
+        self.assertNotIn('state.standalone_demo', page)
 
-    def test_browser_review_document_is_accessible_and_has_no_outbound_controls(self):
+    def test_seller_document_is_accessible_and_has_no_review_or_outbound_controls(self):
         from pathlib import Path
+        import re
         page = Path(__file__).with_name('sandbox-review-ui.html').read_text()
+        ids = re.findall(r'\bid="([^" ]+)"', page)
+        self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(page.count('id="granite-diagnostic"'), 1)
-        self.assertIn('aria-live="polite"', page)
-        self.assertIn('I reviewed this exact draft', page)
-        self.assertIn('CREATED_NOT_APPROVED', page)
-        self.assertIn('cannot contact PayPal or send anything', page)
-        self.assertIn('Offline template · no AI inference', page)
-        self.assertIn('Granite local inference used', page)
-        self.assertIn('No model execution is claimed until a draft appears.', page)
-        self.assertIn('state.standalone_demo', page)
-        self.assertIn("state.client_kind === 'stub'", page)
-        self.assertIn("state.client_kind === 'granite'", page)
-        self.assertIn("call('/api/refresh', {})", page)
+        for attribute in ('aria-labelledby', 'aria-describedby'):
+            for references in re.findall(attribute + r'="([^"]+)"', page):
+                for reference in references.split():
+                    self.assertIn(reference, ids)
+        for expected in ('aria-live="polite"', 'for="buyer-question"', ':focus-visible',
+                         '@media(max-width:480px)', 'maxlength="500"',
+                         'Generate response', 'Message response', 'Customer question',
+                         'Sample order', 'PayPal Sandbox', 'Local only', 'Order check expired',
+                         'CREATED_NOT_APPROVED', 'failure.http_status', 'call_counts',
+                         'No retry was made', "call('/api/refresh', {})",
+                         "call('/api/generate', {question})"):
+            self.assertIn(expected, page)
+        for removed in ('I reviewed this exact draft', 'Internal test', 'Nothing has been sent',
+                        'Drafts stay here', 'Prepare draft', 'No model execution is claimed',
+                        'Session and model details', 'Local Granite', 'Second Brain',
+                        "call('/api/review'", 'id="review"', 'id="review-state"',
+                        'capture-order', 'send-message'):
+            self.assertNotIn(removed, page)
         self.assertIn('state.live_refresh_status', page)
-        self.assertIn('OAuth attempts:', page)
-        self.assertIn('pinned-order GET attempts:', page)
-        self.assertIn('failure.http_status', page)
-        self.assertIn('Refresh pinned sandbox order', page)
-        self.assertIn('Buyer question (use synthetic demo text)', page)
-        self.assertIn('Question interpreted as:', page)
-        self.assertIn("call('/api/generate', {question})", page)
-        self.assertIn('Sandbox credentials are sent to PayPal for authentication', page)
-        self.assertIn('Generate is available for up to five minutes.', page)
-        self.assertIn('The only order-data request is one read-only GET of that known order.', page)
-        self.assertNotIn('stub · stub', page)
-        self.assertNotIn('capture-order', page)
-        self.assertNotIn('send-message', page)
+        self.assertIn('state.generation_failure', page)
+        self.assertIn('state.new_question_enabled', page)
 
     def test_review_session_classifies_question_without_echoing_it_in_response_state(self):
         session = ReviewSession(StubClient(style_id='concise'))

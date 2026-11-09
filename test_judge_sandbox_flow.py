@@ -54,6 +54,7 @@ class FakeTransport:
         return result
 
 
+@unittest.skipUnless(__import__("private_file_support").supports_private_files(), "POSIX owner-private filesystem behavior unavailable")
 class FlowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

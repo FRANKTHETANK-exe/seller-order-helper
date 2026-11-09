@@ -57,6 +57,7 @@ print('fresh stub import passed')
   with patch('builtins.__import__',side_effect=guarded):
    with self.assertRaises(LocalModelHeld) as error:GraniteClient()
   self.assertEqual(error.exception.failure_code,'MODEL_PLATFORM_UNSUPPORTED')
+ @unittest.skipUnless(sys.platform != "win32", "POSIX lock module unavailable")
  def test_supported_client_retains_real_posix_lock_module(self):
   import fcntl
   with tempfile.TemporaryDirectory() as tmp:

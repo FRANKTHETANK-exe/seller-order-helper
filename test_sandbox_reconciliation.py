@@ -243,8 +243,9 @@ class ReconciliationTests(unittest.TestCase):
             self.assertFalse(db.exists())
             self.assertIn('[PAYPAL SANDBOX READ-ONLY]', rendered)
             self.assertIn('Source: synthetic_order_fixture', rendered)
-            self.assertIn('Human review: NO SANDBOX REPLY DRAFT IS AVAILABLE', rendered)
-            self.assertIn('not buyer-approved or paid', rendered)
+            self.assertIn('This command displays facts only; it does not generate a draft.', rendered)
+            self.assertIn('buyer approval and captured payment are not established', rendered)
+            self.assertIn('python3 -B app.py --client stub sandbox-ai-review', rendered)
             self.assertIn('no approve, capture, refund, fulfillment, or send action', rendered)
             self.assertNotIn('suggestion digest', rendered.lower())
 
@@ -265,7 +266,8 @@ class ReconciliationTests(unittest.TestCase):
             self.assertIn('Source: live_paypal_sandbox_read', output.getvalue())
             self.assertIn('Live read observed at: 2026-10-29T23:50:00Z', output.getvalue())
             self.assertIn('CREATED_NOT_APPROVED', output.getvalue())
-            self.assertIn('NO SANDBOX REPLY DRAFT IS AVAILABLE', output.getvalue())
+            self.assertIn('This command displays facts only; it does not generate a draft.', output.getvalue())
+            self.assertIn('For a separate offline draft using synthetic example data', output.getvalue())
 
 
 if __name__ == '__main__':

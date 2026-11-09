@@ -7,6 +7,7 @@ memory for this server session. It has no PayPal transport or send/action route.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ from urllib.parse import urlsplit
 from sandbox_ai_review import (facts_from_receipt, generate_sandbox_review,
                                normalize_payment_question,
                                facts_from_verified_live_read, record_human_review,
-                               LIVE_SOURCES)
+                               LIVE_SOURCES, SandboxOrderFacts, validate_review_draft)
 from sandbox_reconciliation import read_recorded_evidence
 
 PAGE = Path(__file__).with_name('sandbox-review-ui.html')
@@ -84,12 +85,15 @@ class ReviewSession:
     """One saved receipt or one pinned live read, plus at most one model attempt."""
 
     def __init__(self, client, *, refresh_known_order=None, reviewer_pin_path=None,
-                 clock=None, live_max_age_seconds=300):
+                 clock=None, live_max_age_seconds=300, _initial_facts=None):
         if refresh_known_order is not None and not callable(refresh_known_order):
             raise TypeError('Live refresh must be an explicit callable')
         if type(live_max_age_seconds) is not int or not 1 <= live_max_age_seconds <= 600:
             raise ValueError('Live fact age bound is invalid')
-        self.facts = facts_from_receipt(read_recorded_evidence())
+        if _initial_facts is not None and type(_initial_facts) is not SandboxOrderFacts:
+            raise TypeError('Completed review requires exact validated order facts')
+        self.facts = (replace(_initial_facts) if _initial_facts is not None
+                      else facts_from_receipt(read_recorded_evidence()))
         self.client = client
         self._refresh_known_order = refresh_known_order
         self._reviewer_pin_path = Path(reviewer_pin_path) if reviewer_pin_path is not None else None
@@ -102,7 +106,39 @@ class ReviewSession:
         self.generation_failure = None
         self.suggestion = None
         self.review_result = None
+        self.question_version = 0
         self.lock = threading.Lock()
+
+    def _offline_questions_enabled(self):
+        from local_model import StubClient
+        return (type(self) is ReviewSession and type(self.client) is StubClient
+                and self.facts.source == 'synthetic_order_fixture'
+                and self._refresh_known_order is None)
+
+    def _check_question_version(self, version):
+        # Original one-shot clients need no version. After an explicit reset,
+        # every draft/review request must identify the current local question.
+        if version is None and self.question_version == 0:
+            return
+        if type(version) is not int or version != self.question_version:
+            raise ReviewUIError('This question changed in another tab. Reload session status before continuing.')
+
+    def new_question(self, question_version):
+        """Clear a completed synthetic stub example; never reset a model/read limit."""
+        with self.lock:
+            if not self._offline_questions_enabled():
+                raise ReviewUIError('New questions here are available only for synthetic offline template sessions.')
+            if type(question_version) is not int:
+                raise ReviewUIError('Reload the current question before starting another.')
+            self._check_question_version(question_version)
+            if self.suggestion is None or self.generation_failure is not None:
+                raise ReviewUIError('Finish and inspect this offline draft before starting another question.')
+            self.question_version += 1
+            self.attempted = False
+            self.generation_failure = None
+            self.suggestion = None
+            self.review_result = None
+            return self.state()
 
     def _live_facts_fresh(self):
         if self.facts.source not in LIVE_SOURCES:
@@ -176,7 +212,7 @@ class ReviewSession:
                     self.refresh_failure['call_counts'] = dict(self.refresh_call_counts)
                 # Keep the last validated receipt on screen as historical evidence.
                 self.facts = facts_from_receipt(read_recorded_evidence())
-                raise ReviewUIError('Live refresh failed validation. Saved receipt remains historical; no AI draft was generated.') from None
+                raise ReviewUIError('Order refresh failed validation. No message response was generated.') from None
 
     @staticmethod
     def _safe_call_counts(value):
@@ -211,6 +247,8 @@ class ReviewSession:
                                          if self.refresh_call_counts is not None else None),
             'live_facts_fresh': self._live_facts_fresh(),
             'generation_attempted': self.attempted,
+            'question_version': self.question_version,
+            'new_question_enabled': self._offline_questions_enabled(),
             'generation_failure': dict(self.generation_failure) if self.generation_failure else None,
             'draft': None,
             'review_status': 'not_generated',
@@ -226,16 +264,19 @@ class ReviewSession:
                 'facts_fingerprint': self.suggestion.facts_fingerprint,
                 'human_review_required': True,
                 'sent': False,
+                'seller_next_step': self.suggestion.seller_next_step,
+                'seller_attention': list(self.suggestion.seller_attention),
             }
             result['review_status'] = ('reviewed_not_sent' if self.review_result
                                        else 'pending_human_review')
         return result
 
-    def generate(self, buyer_question='Has my payment gone through?'):
+    def generate(self, buyer_question='Has my payment gone through?', *, question_version=None):
         with self.lock:
+            self._check_question_version(question_version)
             if self._refresh_known_order is not None:
                 if self.refresh_failure is not None:
-                    raise ReviewUIError('The live read failed; no AI draft is available from stale receipt data.')
+                    raise ReviewUIError('The order check failed. Refresh is required before preparing a message response.')
                 if not self.refresh_attempted:
                     raise ReviewUIError('Refresh the pinned sandbox order before generating this live-review draft.')
                 if not self._live_facts_fresh():
@@ -274,9 +315,10 @@ class ReviewSession:
                 raise ReviewUIError('Draft generation stopped; no external action occurred.') from None
             return self.state()
 
-    def review(self, digest):
+    def review(self, digest, *, question_version=None):
         with self.lock:
-            if self._refresh_known_order is not None and not self._live_facts_fresh():
+            self._check_question_version(question_version)
+            if self.facts.source in LIVE_SOURCES and not self._live_facts_fresh():
                 raise ReviewUIError('The live facts are stale; this draft cannot be marked reviewed.')
             if self.suggestion is None:
                 raise ReviewUIError('Generate and inspect a draft before recording review.')
@@ -287,6 +329,53 @@ class ReviewSession:
             except Exception:
                 raise ReviewUIError('Review did not match the current draft; nothing changed.') from None
             return self.state()
+
+
+class CompletedReviewSession(ReviewSession):
+    """Review the exact in-memory result of a completed one-shot judge flow."""
+
+    def __init__(self, result, client, *, pin_path, journal_path, clock=None):
+        from local_model import GraniteClient, MODEL, MODEL_DIGEST
+        from reviewer_sandbox_order import read_judge_order_receipt
+        if (type(client) is not GraniteClient or client.execution_verified is not True
+                or client.last_run.get('status') != 'completed'
+                or client.last_run.get('inference_requests_attempted') != 1
+                or client.last_run.get('model') != MODEL
+                or client.last_run.get('model_digest') != MODEL_DIGEST
+                or client.last_run.get('cleanup_confirmed') is not True):
+            raise ReviewUIError('A completed, verified local response is required')
+        if type(result) is not dict or result.get('state') != 'draft_pending_human_review':
+            raise ReviewUIError('A completed Sandbox draft is required')
+        receipt = read_judge_order_receipt(pin_path=Path(pin_path), journal_path=Path(journal_path),
+                                           require_completed_model=True)
+        facts, suggestion = result.get('facts'), result.get('draft')
+        if (type(facts) is not SandboxOrderFacts or facts.source != 'reviewer_live_paypal_sandbox_read'
+                or facts.order_id != receipt.pin.order_id
+                or facts.configuration_id != receipt.pin.configuration_id
+                or facts.observed_at != receipt.observed_at
+                or facts._pin_path is None
+                or Path(facts._pin_path).absolute() != Path(pin_path).absolute()
+                or Path(result.get('journal', '')).absolute() != Path(journal_path).absolute()):
+            raise ReviewUIError('Completed draft does not match its private Sandbox receipt')
+        validate_review_draft(suggestion, facts)
+        super().__init__(client, reviewer_pin_path=pin_path, clock=clock, _initial_facts=facts)
+        self.suggestion = suggestion
+        self.attempted = True
+
+    def refresh(self):
+        raise ReviewUIError('This screen uses the completed Sandbox run; it cannot repeat the read')
+
+    def generate(self, *args, **kwargs):
+        raise ReviewUIError('This is the completed message response; no additional attempt is available')
+
+    def new_question(self, *args, **kwargs):
+        raise ReviewUIError('This completed run cannot start another question')
+
+    def state(self):
+        result = super().state()
+        result.update(completed_flow=True, completed_buyer_question=self.suggestion.buyer_question,
+                      model_execution_verified=True)
+        return result
 
 
 def make_handler(session: ReviewSession):
@@ -365,15 +454,21 @@ def make_handler(session: ReviewSession):
                 return self._json(400, {'error': 'Invalid bounded request.'})
             try:
                 if self.path == '/api/generate':
-                    if (set(request) != {'question'} or type(request['question']) is not str
+                    if (set(request) not in ({'question'}, {'question','question_version'}) or type(request['question']) is not str
                             or len(request['question']) > 500
                             or len(request['question'].encode('utf-8')) > 1200):
                         return self._json(400, {'error':'Enter one question of at most 500 characters.'})
+                    if 'question_version' in request:
+                        return self._json(200, session.generate(request['question'], question_version=request['question_version']))
                     return self._json(200, session.generate(request['question']))
+                if self.path == '/api/new-question' and set(request) == {'question_version'}:
+                    return self._json(200, session.new_question(request['question_version']))
                 if self.path == '/api/refresh' and request == {}:
                     return self._json(200, session.refresh())
-                if (self.path == '/api/review' and set(request) == {'digest'}
+                if (self.path == '/api/review' and set(request) in ({'digest'}, {'digest','question_version'})
                         and type(request['digest']) is str and len(request['digest']) == 64):
+                    if 'question_version' in request:
+                        return self._json(200, session.review(request['digest'], question_version=request['question_version']))
                     return self._json(200, session.review(request['digest']))
             except ReviewUIError as error:
                 if self.path == '/api/refresh':
@@ -393,16 +488,27 @@ def serve_review_ui(client, port=8765, *, refresh_known_order=None, reviewer_pin
         raise ValueError('Invalid local port')
     session = ReviewSession(client, refresh_known_order=refresh_known_order,
                             reviewer_pin_path=reviewer_pin_path)
+    return _serve_session(session, port)
+
+
+def serve_completed_review(result, client, *, pin_path, journal_path, port=0):
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise ValueError('Invalid local port')
+    session = CompletedReviewSession(result, client, pin_path=pin_path, journal_path=journal_path)
+    return _serve_session(session, port)
+
+
+def _serve_session(session, port):
     server = ThreadingHTTPServer(('127.0.0.1', port), make_handler(session))
     server.daemon_threads = True
     address = server.server_address
     print(f'Local review page: http://127.0.0.1:{address[1]}/')
-    if refresh_known_order is None:
+    if isinstance(session, CompletedReviewSession):
+        print('Review the exact draft from the completed Sandbox run. Opening this screen makes no new PayPal or model request.')
+    elif session._refresh_known_order is None:
         print('Private loopback only. Synthetic example only; no PayPal request or outbound action.' if session.facts.source == 'synthetic_order_fixture' else 'Private loopback only. Saved receipt only; no PayPal request or outbound action.')
     else:
         print('Private loopback only. One explicit read-only Sandbox refresh is available after operator click; no order writes or outbound messages.')
-    if getattr(client, 'standalone_demo', False) is True:
-        print('Standalone mode: external task queues are not inspected; the operator confirmed this computer was idle.')
     print('Press Ctrl-C to close. Review state is held in memory for this session only.')
     try:
         server.serve_forever(poll_interval=0.25)
@@ -410,3 +516,4 @@ def serve_review_ui(client, port=8765, *, refresh_known_order=None, reviewer_pin
         pass
     finally:
         server.server_close()
+    return session.state()

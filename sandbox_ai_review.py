@@ -6,6 +6,7 @@ PayPal order, change payment state, fulfill an order, or send a message.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 import hashlib
 import json
 import re
@@ -57,16 +58,54 @@ def normalize_payment_question(question: str) -> str:
 
 def demo_question_intent(question: str) -> str:
     """Transparent offline keyword sample; this is not an AI classification."""
-    value = normalize_payment_question(question).casefold()
-    if any(word in value for word in ('refund', 'return', 'money back')):
+    value = normalize_payment_question(question).casefold().replace('’', "'")
+    if (re.search(r'\b(refunds?|money back)\b', value)
+            or re.search(r'\breturn(?:ing)?\s+(?:(?:my|the|an?|this|these|your)\s+)?'
+                         r'(?:it|items?|orders?|products?|purchase|package|policy)\b', value)):
         return 'refund_question'
-    if any(word in value for word in ('ship', 'delivery', 'arrive', 'tracking')):
+    if (re.search(r'\b(ship(?:ped|ping)?|delivery|arriv(?:e|ed|al)|tracking)\b', value)
+            or re.search(r"\b(?:haven't|hasn't|not|never) received (?:it|my order|the order|the package)\b", value)):
         return 'delivery_status'
-    if any(word in value for word in ('approve', 'approval', 'authorized', 'authorised')):
+    if re.search(r'\b(approve|approval|authorized|authorised)\b', value):
         return 'approval_needed'
-    if any(word in value for word in ('paid', 'payment', 'charge', 'charged', 'gone through')):
+    if re.search(r'\b(paid|payments?|charges?|charged|gone through)\b', value):
         return 'payment_status'
     return 'human_follow_up'
+
+
+def _seller_guidance(facts, question, intent):
+    """Local checks for a seller, not verified buyer claims or model classification."""
+    value = normalize_payment_question(question).casefold().replace('’', "'")
+    flags = []
+    # Do not flag the explicit negation of the demo's duplicate-charge phrase.
+    duplicate_text = re.sub(r"\b(?:not|never|wasn't|weren't)\s+(?:charged|billed|debited)\s+(?:twice|two times)\b", '', value)
+    if re.search(r'\b(?:(?:charged|billed|debited) (?:twice|two times)|double[ -]charged|duplicate charges?|two charges)\b', duplicate_text):
+        flags.append('duplicate_charge')
+    amounts = re.findall(r'(?:\$|\busd\s+)(\d+(?:,\d{3})*(?:\.\d{1,2})?)(?![\d.])', value)
+    if (any(Decimal(amount.replace(',', '')) != Decimal(facts.amount) for amount in amounts)
+            or re.search(r'\b(?:wrong|different|incorrect) amount\b|\bovercharged\b', value)):
+        flags.append('amount_mismatch')
+    if re.search(r"\b(?:unauthori[sz]ed|(?:did not|didn't|never) authori[sz]e|(?:do not|don't) recogni[sz]e)\b", value):
+        flags.append('unrecognized_charge')
+    steps = []
+    if 'duplicate_charge' in flags:
+        steps.append('Compare both reported charges, their transaction IDs and capture records before deciding what happened.')
+    if 'amount_mismatch' in flags:
+        steps.append('Compare the reported receipt’s amount and currency with the matching PayPal transaction and this order; do not assume they refer to the same payment.')
+    if 'unrecognized_charge' in flags:
+        steps.append('Treat the reported unrecognized charge as a separate issue for human investigation; verify the matching transaction before offering a payment or refund explanation.')
+    if flags:
+        steps.append('This order record does not verify the reported charge or resolve the buyer’s claim.')
+    steps.append('Check the current matching PayPal transaction and capture record before confirming payment, promising shipment, or asking the buyer to pay again.')
+    if intent == 'approval_needed':
+        steps.append('Check the current checkout status before telling the buyer whether another approval step is needed.')
+    elif intent == 'delivery_status':
+        steps.append('Check fulfillment and tracking separately; this payment record cannot establish delivery.')
+    elif intent == 'refund_question':
+        steps.append('Check the matching capture and refund records before describing a refund’s status or timing.')
+    elif intent == 'human_follow_up':
+        steps.append('Clarify the buyer’s question and match it to the correct order before drafting a specific answer.')
+    return ' '.join(steps), tuple(flags)
 
 
 @dataclass(frozen=True)
@@ -183,35 +222,44 @@ def validate_sandbox_selection(raw: str, facts: SandboxOrderFacts) -> dict:
 
 
 def _compose(facts: SandboxOrderFacts, intent: str, phrase_id: str, style_id: str) -> str:
+    if facts.source == 'saved_paypal_sandbox_receipt' and intent == 'payment_status':
+        # Keep context and review restrictions in the surrounding interface.
+        # This sentence describes the recorded check, never current payment state.
+        date = facts.observed_at[:10]
+        return (f'Your ${facts.amount} test order was created. '
+                f'The PayPal check saved on {date} does not show buyer approval '
+                'or a payment being taken.')
     if facts.source in LIVE_SOURCES:
         evidence_phrase = (f"The PayPal sandbox read at {facts.observed_at} showed order status CREATED; "
                            'it does not show buyer approval or captured payment.')
     elif facts.source == 'synthetic_order_fixture':
-        evidence_phrase = (f'The offline synthetic fixture dated {facts.observed_at} shows order status CREATED. '
-                           'This is example data, not a PayPal lookup; it does not show buyer approval or captured payment.')
+        evidence_phrase = (f'This is a sample ${facts.amount} order — example data, not a PayPal lookup. '
+                           'It is marked Created; this record does not show buyer approval or captured payment.')
     else:
         evidence_phrase = (f"The saved PayPal sandbox receipt from {facts.observed_at} recorded order status CREATED. "
                            'This is historical evidence, not a current order lookup; it does not show buyer approval or captured payment.')
     if intent == 'payment_status':
         body = evidence_phrase
     elif intent == 'approval_needed':
-        body = evidence_phrase + ' A person must check whether buyer approval is needed.'
+        body = evidence_phrase + ' This record does not tell us whether another approval step is needed.'
     elif intent == 'delivery_status':
-        body = evidence_phrase + ' This payment record does not establish shipping or delivery status; a person must check fulfillment separately.'
+        body = evidence_phrase + ' This payment record does not establish shipping or delivery status.'
     elif intent == 'refund_question':
-        body = evidence_phrase + ' It does not establish refund status. A person must verify that separately.'
+        body = evidence_phrase + ' It does not establish refund status or timing.'
     else:
-        body = evidence_phrase + ' A person must review this question.'
+        body = evidence_phrase + ' This record cannot answer the rest of the question.'
     if phrase_id == 'item_first':
         body = f"For the USD {facts.amount} PayPal sandbox order: {body}"
     if style_id == 'friendly':
         body = 'Thanks for checking in. ' + body
-    return 'Internal Sandbox review draft — not for buyer delivery. ' + body
+    return body
 
 
-def _review_digest(facts_fingerprint, buyer_question, intent, phrase_id, style_id, text):
+def _review_digest(facts_fingerprint, buyer_question, intent, phrase_id, style_id, text,
+                   seller_next_step, seller_attention):
     encoded = json.dumps({'facts':facts_fingerprint,'buyer_question':buyer_question,
-        'intent':intent,'phrase':phrase_id,'style':style_id,'text':text},
+        'intent':intent,'phrase':phrase_id,'style':style_id,'text':text,
+        'seller_next_step':seller_next_step,'seller_attention':seller_attention},
         sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii')
     return hashlib.sha256(encoded).hexdigest()
 
@@ -227,6 +275,8 @@ class SandboxReviewSuggestion:
     review_digest: str
     source: str
     observed_at: str
+    seller_next_step: str
+    seller_attention: tuple[str, ...]
     payment_truth: str = 'CREATED_NOT_APPROVED'
     human_review_required: bool = True
     sent: bool = False
@@ -288,30 +338,44 @@ def generate_sandbox_review(facts: SandboxOrderFacts, client, buyer_question='Ha
     if _fingerprint(facts) != fingerprint:
         raise SuggestionError('Sandbox facts changed during review generation')
     text = _compose(facts, choice['question_intent'], choice['phrase_id'], choice['style_id'])
+    seller_next_step, seller_attention = _seller_guidance(facts, buyer_question, choice['question_intent'])
     digest = _review_digest(fingerprint, buyer_question, choice['question_intent'],
-                            choice['phrase_id'], choice['style_id'], text)
+                            choice['phrase_id'], choice['style_id'], text, seller_next_step, seller_attention)
     return SandboxReviewSuggestion(fingerprint, choice['phrase_id'], choice['style_id'],
         choice['question_intent'], buyer_question,
-        text, digest, facts.source, facts.observed_at)
+        text, digest, facts.source, facts.observed_at, seller_next_step, seller_attention)
+
+
+def validate_review_draft(suggestion: SandboxReviewSuggestion, current_facts: SandboxOrderFacts):
+    """Validate a completed draft without recording any human acknowledgment."""
+    if type(suggestion) is not SandboxReviewSuggestion or type(current_facts) is not SandboxOrderFacts:
+        raise SuggestionError('Expected a generated sandbox review and current receipt facts')
+    if _fingerprint(current_facts) != suggestion.facts_fingerprint:
+        raise SuggestionError('Sandbox facts changed; generate a fresh review draft')
+    if (suggestion.source != current_facts.source or suggestion.observed_at != current_facts.observed_at
+            or suggestion.payment_truth != current_facts.payment_truth
+            or suggestion.human_review_required is not True or suggestion.sent is not False):
+        raise SuggestionError('Review evidence or pending state changed')
+    try:
+        question = normalize_payment_question(suggestion.buyer_question)
+        body = _compose(current_facts, suggestion.question_intent,
+                        suggestion.phrase_id, suggestion.style_id)
+        seller_next_step, seller_attention = _seller_guidance(current_facts, question, suggestion.question_intent)
+        expected_digest = _review_digest(suggestion.facts_fingerprint, question,
+            suggestion.question_intent, suggestion.phrase_id, suggestion.style_id, body,
+            seller_next_step, seller_attention)
+    except (SuggestionError, TypeError, ValueError):
+        raise SuggestionError('Review draft no longer matches its validated facts and question') from None
+    if (body != suggestion.review_text or expected_digest != suggestion.review_digest
+            or seller_next_step != suggestion.seller_next_step
+            or seller_attention != suggestion.seller_attention):
+        raise SuggestionError('Review draft no longer matches its validated facts and question')
 
 
 def record_human_review(suggestion: SandboxReviewSuggestion, current_facts: SandboxOrderFacts,
                         entered_digest: str) -> SandboxReviewResult:
     """Confirm exact local review; this is not a PayPal approval or send action."""
-    if type(suggestion) is not SandboxReviewSuggestion or type(current_facts) is not SandboxOrderFacts:
-        raise SuggestionError('Expected a generated sandbox review and current receipt facts')
-    if _fingerprint(current_facts) != suggestion.facts_fingerprint:
-        raise SuggestionError('Sandbox facts changed; generate a fresh review draft')
-    try:
-        question = normalize_payment_question(suggestion.buyer_question)
-        body = _compose(current_facts, suggestion.question_intent,
-                        suggestion.phrase_id, suggestion.style_id)
-        expected_digest = _review_digest(suggestion.facts_fingerprint, question,
-            suggestion.question_intent, suggestion.phrase_id, suggestion.style_id, body)
-    except (SuggestionError, TypeError, ValueError):
-        raise SuggestionError('Review draft no longer matches its validated facts and question') from None
-    if body != suggestion.review_text or expected_digest != suggestion.review_digest:
-        raise SuggestionError('Review draft no longer matches its validated facts and question')
+    validate_review_draft(suggestion, current_facts)
     if type(entered_digest) is not str or entered_digest != suggestion.review_digest:
         raise SuggestionError('Review digest does not match the displayed draft')
     return SandboxReviewResult(suggestion.review_digest)

@@ -8,6 +8,7 @@ import unittest
 from prepare_paypal_sandbox_env import SetupError, create_env_file
 
 
+@unittest.skipUnless(__import__("private_file_support").supports_private_files(), "POSIX owner-private filesystem behavior unavailable")
 class CredentialSetupTests(unittest.TestCase):
     def test_creates_owner_only_file_without_echo_surface(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -32,6 +33,9 @@ class CredentialSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp) / "private"
             parent.mkdir(mode=0o755)
+            # A restrictive caller umask must not turn this intentionally
+            # insecure fixture into an owner-only directory before the check.
+            parent.chmod(0o755)
             target = parent / "credentials.env"
             with self.assertRaises(SetupError):
                 create_env_file(target, "fixture-id", "fixture-secret")

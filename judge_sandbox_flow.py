@@ -17,6 +17,7 @@ import stat
 import sys
 from uuid import uuid4
 
+from private_file_support import supports_private_files
 from facts import CURRENCY, AMOUNT
 from reviewer_sandbox_order import DEFAULT_JUDGE_ORDER_PIN, write_order_pin
 from sandbox_adapter import (AdapterError, HttpRequest, HttpResponse,
@@ -97,6 +98,9 @@ class OneShotJournal:
         }
 
     def _check_parent(self):
+        if not supports_private_files():
+            raise AdapterError('Private Sandbox files require supported POSIX ownership and permissions',
+                               stage='journal', failure_code='PRIVATE_FILES_UNSUPPORTED')
         parent = self.path.parent.lstat()
         if (not stat.S_ISDIR(parent.st_mode) or stat.S_ISLNK(parent.st_mode)
                 or parent.st_uid != os.getuid() or stat.S_IMODE(parent.st_mode) & 0o077):
@@ -285,6 +289,9 @@ def run_once(*, transport, credentials, granite_client, question: str,
     """
     from sandbox_ai_review import (SandboxOrderFacts, generate_sandbox_review,
                                    normalize_payment_question)
+    if not supports_private_files():
+        raise AdapterError('Private Sandbox files require supported POSIX ownership and permissions',
+                           stage='journal', failure_code='PRIVATE_FILES_UNSUPPORTED')
     question = normalize_payment_question(question)
     if Path(pin_path).exists() or Path(pin_path).is_symlink():
         raise AdapterError('An existing Sandbox order pin is present; no order was created',
@@ -343,10 +350,14 @@ def run_once(*, transport, credentials, granite_client, question: str,
             source='reviewer_live_paypal_sandbox_read', observed_at=observed_at,
             configuration_id=pin.configuration_id, _pin_path=Path(pin_path))
         from local_model import MODEL, MODEL_DIGEST
+        from runtime_guard import swap_policy
         policy = getattr(granite_client, 'stable_swap_policy', None)
+        fixed_policy = swap_policy(standalone_demo=getattr(granite_client, 'standalone_demo', False))
         journal.value['model'].update(expectedModel=MODEL, expectedDigest=MODEL_DIGEST,
-            startedAt=now(), guardPolicy='stable_swap_baseline' if policy else 'zero_swap',
+            startedAt=now(), guardPolicy='stable_swap_baseline' if policy else fixed_policy['name'],
             baselineMiB=getattr(policy, 'baseline_mib', None))
+        if policy is None:
+            journal.value['model']['maxSwapMiB'] = fixed_policy['max_swap_mib']
         journal.value['state'] = 'granite_started'
         journal.value['model'].update(attempted=True, status='started', requestCount=1)
         journal.save()
@@ -373,7 +384,7 @@ def run_once(*, transport, credentials, granite_client, question: str,
         journal.save()
         return {'state': 'draft_pending_human_review', 'order_status': readback.order_status,
                 'payment_truth': readback.payment_truth, 'observed_at': observed_at,
-                'draft': suggestion, 'calls': journal.value['calls'],
+                'draft': suggestion, 'facts': facts, 'calls': journal.value['calls'],
                 'journal': str(Path(journal_path))}
     except AdapterError as error:
         journal.value['state'] = 'stopped'
@@ -394,10 +405,14 @@ def main(argv=None):
                         help='new owner-only pin destination; must not exist')
     parser.add_argument('--journal', type=Path,
                         help='new private single-attempt journal; must not exist')
-    parser.add_argument('--standalone', action='store_true', help='isolated macOS judge host; explicit idle-workload attestation, zero swap and pinned model digest required')
+    parser.add_argument('--standalone', action='store_true', help='isolated macOS or supported Linux host; explicit idle confirmation and local model/resource checks required')
+    parser.add_argument('--review-ui', action='store_true', help='serve the completed draft for local seller review without another PayPal read or model request')
+    parser.add_argument('--review-port', type=int, default=0, help='loopback review port; default 0 chooses an available port')
     parser.add_argument('--stable-swap-baseline', action='store_true')
     parser.add_argument('--resource-proof', type=Path, help='existing reviewed local controller liveness proof, never bundled')
     args = parser.parse_args(argv)
+    if not 0 <= args.review_port <= 65535 or (args.review_port and not args.review_ui):
+        parser.error('--review-port requires --review-ui and must be between 0 and 65535')
     if not args.run:
         print(json.dumps({'state': 'not_run', 'reason': 'explicit_run_flag_required'}))
         return 0
@@ -460,7 +475,19 @@ def main(argv=None):
     print('Observed at: ' + result['observed_at'])
     print('Draft status: PENDING HUMAN REVIEW — NOT SENT')
     print(result['draft'].review_text)
+    print('Seller next step: ' + result['draft'].seller_next_step)
     print('Private one-shot receipt: ' + result['journal'])
+    if args.review_ui:
+        from sandbox_review_ui import serve_completed_review
+        try:
+            state = serve_completed_review(result, client, pin_path=args.reviewer_order_pin,
+                                           journal_path=args.journal, port=args.review_port)
+        except (OSError, ValueError, runtime_guard.PilotStop):
+            print('The Sandbox read and Granite draft completed, but the local review screen could not open. '
+                  'Preserve the completed receipt; do not rerun the Sandbox attempt.', file=sys.stderr)
+            return 2
+        print('Local seller review recorded. Nothing was sent.' if state['review_status'] == 'reviewed_not_sent'
+              else 'Seller review remains pending. Nothing was sent.')
     return 0
 
 

@@ -72,6 +72,7 @@ def make_private_dir(base: Path) -> Path:
     return path
 
 
+@unittest.skipUnless(__import__("private_file_support").supports_private_files(), "POSIX owner-private filesystem behavior unavailable")
 class ReviewerOrderPinTests(unittest.TestCase):
     @staticmethod
     def write_successful_journal(path, *, order_id, configuration_id):

@@ -41,7 +41,7 @@ DRAFT_COLUMNS = ('order_id', 'suggestion_id', 'order_revision', 'category', 'phr
 RUN_METADATA_KEYS = frozenset({'status', 'model', 'model_digest', 'request_id',
     'inference_requests_attempted', 'metrics', 'wall_seconds', 'limits',
     'memory_min_free_percent', 'model_vram_max_bytes', 'swap_used_mib_max',
-    'admission_profile', 'controller_queue_visibility',
+    'admission_profile', 'controller_queue_visibility', 'swap_policy',
     'cleanup_confirmed', 'reason', 'error_stage', 'error_code',
     'request_attempted', 'attempt_count', 'error_http_status'})
 
@@ -337,9 +337,12 @@ def sandbox_order_view(*, refresh=False, review=False):
     print('Payment truth: ' + facts['payment_truth'])
     print('Capture status: ' + str(facts['capture_status']))
     if review:
-        print('Human review: NO SANDBOX REPLY DRAFT IS AVAILABLE IN THIS APP.')
+        print('This command displays facts only; it does not generate a draft.')
         if facts['payment_truth'] == 'CREATED_NOT_APPROVED':
-            print('Reason: this order is not buyer-approved or paid; payment-confirmation wording would be unsupported.')
+            print('A draft must state that buyer approval and captured payment are not established.')
+        print('For a separate offline draft using synthetic example data, run:')
+        print('python3 -B app.py --client stub sandbox-ai-review')
+        print('That preview uses fixed wording, makes no PayPal or model request, and leaves review pending.')
         print('The sandbox view is read-only. It has no approve, capture, refund, fulfillment, or send action.')
     if refresh:
         print('Refresh made one read-only GET after OAuth. No create, approve, capture, refund, or send action exists here.')
@@ -392,11 +395,15 @@ def _confirm_standalone_demo(client):
     """Operator confirms isolation because portable mode cannot inspect task queues."""
     if not getattr(client, 'standalone_demo', False):
         return True
-    print('STANDALONE GRANITE DEMO: Second Brain / external task queues are not inspected.')
-    print('Continue only on an isolated computer after confirming no other AI task is queued or running.')
-    print('Local checks still pin the Granite digest, require no loaded model, >=40% free memory, zero swap, and bounded disk/load.')
+    from runtime_guard import swap_policy
+    policy = swap_policy(standalone_demo=True)
+    swap_limit = ('zero swap' if policy['max_swap_mib'] == 0
+                  else f"at most {policy['max_swap_mib']} MiB allocated swap")
+    print('LOCAL RESPONSE SETUP: Resource checks cannot detect all scheduled or background work.')
+    print('Continue only after confirming this computer is free of other local model or heavy processing work.')
+    print(f'Checks require the verified local model, no model already loaded, >=40% memory headroom, {swap_limit}, and sufficient disk space.')
     try:
-        answer = input('Type RUN only if the computer is idle for this one local inference: ')
+        answer = input('Type RUN to confirm this computer is idle and allow one local response attempt: ')
     except (EOFError, KeyboardInterrupt):
         answer = ''
     if not client.attest_standalone(answer):
@@ -411,8 +418,8 @@ def _confirm_standalone_demo(client):
     print('Standalone preflight passed: ' + checked['cached_models'][0] +
           ' digest ' + checked['model_digests'][checked['cached_models'][0]][:12] +
           '…; ' + str(resources['memory_pressure_free_percent']) +
-          '% free memory; zero-swap check passed; no other model loaded.')
-    print('Controller queues were not checked. Attestation expires after 10 minutes; one request maximum.')
+          '% memory headroom; memory checks passed; no other model loaded.')
+    print('Your confirmation expires after 10 minutes. This session permits one response attempt.')
     return True
 
 
@@ -423,7 +430,7 @@ def main(argv=None, *, client=None):
     parser.add_argument('--client', choices=('stub', 'granite'), default='stub',
                         help='wording selector; granite explicitly requests guarded local inference')
     parser.add_argument('--portable-standalone', action='store_true',
-                        help='isolated macOS judge mode: local resource/digest checks plus explicit idle-workload attestation; does not inspect Second Brain queues')
+                        help='isolated macOS/Linux mode with local resource checks and explicit confirmation before one response attempt')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('create', help='create one fixed synthetic seller/product order')
     commands.add_parser('list', help='list synthetic orders')
@@ -434,7 +441,13 @@ def main(argv=None, *, client=None):
     sandbox_review = commands.add_parser('sandbox-review', help='read-only human-review context for the one known sandbox order')
     sandbox_review.add_argument('--refresh', action='store_true',
                          help='authenticate using the owner-only sandbox file and GET only the receipt-pinned order')
-    commands.add_parser('sandbox-ai-review', help='generate a receipt-grounded local AI review draft and request explicit in-session human review')
+    ai_review = commands.add_parser('sandbox-ai-review', help='generate a receipt-grounded local AI review draft and request explicit in-session human review')
+    ai_review.add_argument('--saved-reviewer-order', action='store_true',
+                           help='use a validated historical Sandbox pin/journal instead of the synthetic fixture; no PayPal request')
+    ai_review.add_argument('--reviewer-order-pin', type=Path,
+                           help='existing owner-only pin for the saved Sandbox receipt')
+    ai_review.add_argument('--reviewer-order-journal', type=Path,
+                           help='existing successful create/read journal matching the pin')
     review_ui = commands.add_parser('sandbox-review-ui', help='open a private loopback browser page for the saved sandbox review flow')
     review_ui.add_argument('--port', type=int, default=8765,
                            help='loopback port (0 selects an available temporary port)')
@@ -491,10 +504,25 @@ def main(argv=None, *, client=None):
                 print(f'[PAYPAL SANDBOX READ-ONLY] unavailable at {stage} ({code}); no automatic retry.', file=sys.stderr)
                 return 2
         if args.command == 'sandbox-ai-review':
-            from sandbox_reconciliation import read_recorded_evidence
+            from sandbox_reconciliation import read_recorded_evidence, read_saved_judge_order_facts
+            from sandbox_adapter import AdapterError
             from sandbox_ai_review import (LABEL, facts_from_receipt,
                 generate_sandbox_review, record_human_review)
-            facts = facts_from_receipt(read_recorded_evidence())
+            if args.saved_reviewer_order:
+                if (args.reviewer_order_pin is None or args.reviewer_order_journal is None
+                        or not args.reviewer_order_pin.is_absolute()
+                        or not args.reviewer_order_journal.is_absolute()):
+                    raise AppError('Saved review requires explicit absolute pin and journal paths.')
+                try:
+                    saved = read_saved_judge_order_facts(pin_path=args.reviewer_order_pin,
+                                                       journal_path=args.reviewer_order_journal)
+                    facts = facts_from_receipt(saved, pin_path=args.reviewer_order_pin)
+                except (AdapterError, ValueError):
+                    raise AppError('Saved Sandbox pin/journal failed validation; no model or PayPal request was made.') from None
+            else:
+                if args.reviewer_order_pin is not None or args.reviewer_order_journal is not None:
+                    raise AppError('Pin and journal options require --saved-reviewer-order.')
+                facts = facts_from_receipt(read_recorded_evidence())
             selected = client if client is not None else _make_client(args.client,
                 standalone_demo=args.portable_standalone)
             if not _confirm_standalone_demo(selected):
@@ -511,6 +539,7 @@ def main(argv=None, *, client=None):
             else:
                 print('OFFLINE REVIEW PREVIEW — NO MODEL INFERENCE; NOT SENT')
             print(suggestion.review_text)
+            print('Seller next step: ' + suggestion.seller_next_step)
             print('Review digest: ' + suggestion.review_digest)
             print('HUMAN REVIEW PENDING. This draft is not sent; this command has no PayPal action.')
             try:

@@ -30,6 +30,26 @@ LIMITS={'num_ctx':4096,'num_predict':256,'num_thread':4,
         'max_model_vram_bytes':10*GIB,'min_disk_free_bytes':20*GIB}
 GENERATION_OPTIONS={'num_ctx':4096,'num_predict':256,'num_thread':4,'temperature':0,'seed':17}
 
+# Dedicated Linux judge VMs can spend over 60 seconds reading/repacking a cold
+# cached model. This fixed profile extends only that one owned request, including
+# loading and inference. Controller/Mac budgets and every resource check remain.
+STANDALONE_LINUX_REQUEST_SECONDS = 180
+STANDALONE_LINUX_MAX_SWAP_MIB = 16
+
+
+def request_budget_seconds(*, standalone_demo=False):
+    if standalone_demo is True and sys.platform == 'linux':
+        return STANDALONE_LINUX_REQUEST_SECONDS
+    return LIMITS['request_seconds']
+
+
+def swap_policy(*, standalone_demo=False):
+    """Fixed local profile, never a CLI override or a paging-pressure claim."""
+    if standalone_demo is True and sys.platform == 'linux':
+        return {'name': 'linux_standalone_small_swap',
+                'max_swap_mib': STANDALONE_LINUX_MAX_SWAP_MIB}
+    return {'name': 'zero_swap', 'max_swap_mib': 0}
+
 class PilotStop(RuntimeError):
     def __init__(self, message, *, stage=None, failure_code=None, http_status=None):
         super().__init__(message)
@@ -128,6 +148,16 @@ def queue_counts():
 
 def local_resources():
     """Bounded host/runtime metrics; does not inspect Second Brain queues."""
+    if sys.platform == 'linux':
+        from linux_resources import snapshot, LinuxMeasurementError
+        try:
+            return snapshot(ROOT)
+        except LinuxMeasurementError:
+            raise PilotStop('Linux host resource checks did not pass; no inference permitted',
+                            stage='resource_guard', failure_code='RESOURCE_ADMISSION_DENIED') from None
+    if sys.platform != 'darwin':
+        raise PilotStop('Host resource measurements are unsupported on this platform',
+                        stage='admission', failure_code='MODEL_PLATFORM_UNSUPPORTED')
     pressure = command(['/usr/bin/memory_pressure', '-Q'])
     match = re.search('System-wide memory free percentage:\\s*(\\d+)%', pressure)
     swap = command(['/usr/sbin/sysctl', '-n', 'vm.swapusage'])
@@ -141,9 +171,45 @@ def resources():
     result['queue_counts'] = queue_counts()
     return result
 
-def guard(snapshot, loaded, own_model=None, *, check_controller=True):
-    if snapshot['swap_used_mib'] > 0:
-        raise PilotStop('swap is nonzero; admission requires review', stage='resource_guard',
+def guard(snapshot, loaded, own_model=None, *, check_controller=True,
+          standalone_demo=False):
+    policy = swap_policy(standalone_demo=standalone_demo)
+    if not isinstance(snapshot, dict):
+        raise PilotStop('resource measurement is invalid', stage='resource_guard',
+                        failure_code='RESOURCE_ADMISSION_DENIED')
+    for name in ('swap_used_mib', 'memory_pressure_free_percent', 'load_1m'):
+        value = snapshot.get(name)
+        try:
+            valid = type(value) in (int, float) and math.isfinite(value) and value >= 0
+        except OverflowError:
+            valid = False
+        if not valid:
+            raise PilotStop('resource measurement is invalid', stage='resource_guard',
+                            failure_code='RESOURCE_ADMISSION_DENIED')
+    if (snapshot['memory_pressure_free_percent'] > 100
+            or type(snapshot.get('disk_free_bytes')) is not int
+            or not 0 <= snapshot['disk_free_bytes'] <= 2**63 - 1):
+        raise PilotStop('resource measurement is invalid', stage='resource_guard',
+                        failure_code='RESOURCE_ADMISSION_DENIED')
+    if policy['max_swap_mib']:
+        available, total = (snapshot.get('memory_available_bytes'),
+                            snapshot.get('memory_total_bytes'))
+        if (check_controller is not False or snapshot.get('resource_platform') != 'linux'
+                or type(available) is not int or type(total) is not int
+                or not 0 < total <= 2**63 - 1 or not 0 <= available <= total
+                or not math.isclose(snapshot['memory_pressure_free_percent'],
+                    100 * available / total, rel_tol=1e-9, abs_tol=1e-6)):
+            raise PilotStop('Linux standalone measurement is invalid',
+                            stage='resource_guard', failure_code='RESOURCE_ADMISSION_DENIED')
+    if snapshot.get('resource_platform') == 'linux' and own_model not in MODELS:
+        available = snapshot.get('memory_available_bytes')
+        if type(available) is not int or available < 4 * GIB:
+            raise PilotStop('Linux startup headroom is below 4 GiB',
+                            stage='resource_guard', failure_code='RESOURCE_ADMISSION_DENIED')
+    if snapshot['swap_used_mib'] > policy['max_swap_mib']:
+        message = ('swap exceeds the Linux standalone allowance' if policy['max_swap_mib']
+                   else 'swap is nonzero; admission requires review')
+        raise PilotStop(message, stage='resource_guard',
                         failure_code='SWAP_NONZERO')
     if snapshot['memory_pressure_free_percent'] < LIMITS['min_pressure_free_percent']:
         raise PilotStop('memory threshold reached; wait')
@@ -180,7 +246,7 @@ def guard(snapshot, loaded, own_model=None, *, check_controller=True):
 class StableSwapBaseline:
     """One-call, opt-in policy for stable pre-existing swap allocation.
 
-    The ordinary guard still requires zero swap. This ephemeral policy admits
+    The controller guard still requires zero swap. This ephemeral policy admits
     only after three fresh identical measurements and requires every later
     monitor sample to match exactly. It never mutates persistent settings.
     """
@@ -252,6 +318,11 @@ def resource_observation(sample, elapsed, *, standalone_demo):
     }
     if not standalone_demo:
         observation['queue_counts'] = sample['queue_counts']
+    for key in ('memory_available_bytes', 'memory_total_bytes', 'load_1m',
+                'disk_free_bytes'):
+        value = sample.get(key)
+        if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+            observation[key] = value
     return observation
 
 def inspect(*, stable_swap_policy=None):
@@ -303,14 +374,15 @@ def inspect(*, stable_swap_policy=None):
             'swap_baseline_mib': stable_swap_policy.baseline_mib if stable_swap_policy else None}
 
 def inspect_standalone(expected_digests):
-    """Portable demo admission for an explicitly isolated macOS judge host.
+    """Standalone admission for a macOS or compatible Linux judge host.
 
     This deliberately does not read controller queues or stale-claim evidence.
     The operator must attest that no other AI task is queued/running; all local
     Ollama, model digest and resource checks remain active.
     """
-    if sys.platform != 'darwin':
-        raise PilotStop('standalone portable admission currently supports macOS only')
+    if sys.platform not in ('darwin', 'linux'):
+        raise PilotStop('standalone admission requires macOS or compatible Linux',
+                        stage='admission', failure_code='MODEL_PLATFORM_UNSUPPORTED')
     if (not isinstance(expected_digests, dict) or set(expected_digests) != set(MODELS)
             or any(not isinstance(v, str) or not re.fullmatch(r'[a-f0-9]{64}', v)
                    for v in expected_digests.values())):
@@ -335,7 +407,7 @@ def inspect_standalone(expected_digests):
             raise PilotStop('cached Granite digest changed; no inference permitted',
                             stage='digest_check', failure_code='MODEL_DIGEST_MISMATCH')
     try:
-        guard(snapshot, loaded, check_controller=False)
+        guard(snapshot, loaded, check_controller=False, standalone_demo=True)
     except PilotStop as error:
         if error.failure_code in ('SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
             raise
@@ -349,6 +421,7 @@ def inspect_standalone(expected_digests):
             'model_digests': {m: installed[m] for m in MODELS},
             'loaded_models': loaded.get('models', []), 'resources': snapshot,
             'admission': 'portable_local_checks_passed',
+            'swap_policy': swap_policy(standalone_demo=True),
             'controller_queue_visibility': 'not_checked_standalone_mode'}
 
 def generate(model, prompt, response_format=None, *, standalone_demo=False,
@@ -358,6 +431,7 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
     Closing the request is not authority to kill/restart shared daemon processes.
     Any cancellation stops the complete pilot and requires checking /api/ps.
     """
+    budget_seconds = request_budget_seconds(standalone_demo=standalone_demo)
     payload = {'model': model, 'prompt': prompt, 'think': False, 'stream': True, 'keep_alive': 0, 'options': dict(GENERATION_OPTIONS)}
     if response_format is not None:
         if response_format != 'json' and not isinstance(response_format, dict):
@@ -365,7 +439,11 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
         payload['format'] = response_format
     if len(prompt.encode()) > 4096:
         raise PilotStop('prompt exceeds pilot bound')
-    conn = http.client.HTTPConnection('127.0.0.1', 11434, timeout=15)
+    # Cold model loading can delay the first response headers. Use the resolved
+    # request profile here; the watchdog below still bounds the whole request,
+    # including all reads, and the resource monitor remains active throughout.
+    conn = http.client.HTTPConnection('127.0.0.1', 11434,
+                                      timeout=budget_seconds)
     finished = threading.Event()
     stopped = []
     observations = []
@@ -385,7 +463,7 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
     def monitor():
         while not finished.wait(2):
             try:
-                if time.monotonic() - start > LIMITS['request_seconds']:
+                if time.monotonic() - start > budget_seconds:
                     raise PilotStop('request wall limit exceeded', stage='model_request',
                                     failure_code='MODEL_REQUEST_FAILED')
                 monitor_state['phase'] = 'resources'
@@ -399,7 +477,8 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
                 observations.append(dict(monitor_state['last_observation']))
                 if stable_swap_policy is None:
                     guard(sample, loaded, own_model=model,
-                          check_controller=not standalone_demo)
+                          check_controller=not standalone_demo,
+                          standalone_demo=standalone_demo)
                 else:
                     stable_swap_policy.check(sample, loaded, own_model=model,
                           check_controller=not standalone_demo)
@@ -412,14 +491,14 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
                 code = getattr(exc, 'failure_code', None)
                 if stage not in ('resource_guard', 'model_request') or code not in (
                         'RESOURCE_ADMISSION_DENIED', 'MODEL_REQUEST_FAILED',
-                        'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
+                        'SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
                     stage, code = (('resource_guard', 'RESOURCE_ADMISSION_DENIED')
                                    if monitor_state['phase'] in ('resources', 'loaded_model_health', 'guard')
                                    else ('model_request', 'MODEL_REQUEST_FAILED'))
                 cancel('monitor stopped', stage=stage, failure_code=code)
                 return
     watcher = threading.Thread(target=monitor, daemon=True)
-    watchdog = threading.Timer(LIMITS['request_seconds'], cancel,
+    watchdog = threading.Timer(budget_seconds, cancel,
         kwargs={'_reason':'request wall limit exceeded','stage':'model_request',
                 'failure_code':'MODEL_REQUEST_FAILED'})
     watchdog.daemon = True
@@ -469,12 +548,12 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
                 raise PilotStop('generated text byte bound exceeded', stage='response_parse',
                                 failure_code='MODEL_RESPONSE_INVALID')
             chunks.append(text)
-            if time.monotonic() - start > LIMITS['request_seconds']:
+            if time.monotonic() - start > budget_seconds:
                 raise PilotStop('request wall limit exceeded')
             if item.get('done') is True:
                 final = item
                 break
-            if time.monotonic() - start > LIMITS['request_seconds']:
+            if time.monotonic() - start > budget_seconds:
                 raise PilotStop('request wall limit exceeded')
         if stopped:
             stage, failure_code = stopped[0]
@@ -487,19 +566,21 @@ def generate(model, prompt, response_format=None, *, standalone_demo=False,
         metrics = {key: final.get(key) for key in metric_keys}
         duration = metrics.get('eval_duration')
         metrics['tokens_per_second'] = metrics['eval_count'] * 1000000000.0 / duration if isinstance(duration, (int, float)) and duration > 0 and isinstance(metrics['eval_count'], int) else None
-        return {'code': ''.join(chunks), 'metrics': metrics, 'wall_seconds': time.monotonic() - start, 'resource_samples': observations, 'options': payload['options']}
+        return {'code': ''.join(chunks), 'metrics': metrics, 'wall_seconds': time.monotonic() - start, 'resource_samples': observations, 'options': payload['options'], 'request_budget_seconds': budget_seconds}
     except Exception as exc:
         monitor_failure = stopped[0] if stopped else None
         stage = getattr(exc, 'stage', None)
         failure_code = getattr(exc, 'failure_code', None)
-        if monitor_failure is not None and type(exc) is PilotStop:
+        # Cancellation normally interrupts socket I/O with a transport exception.
+        # Preserve the monitor's cause instead of relabeling it as a network error.
+        if monitor_failure is not None:
             stage, failure_code = monitor_failure
         http_status = getattr(exc, 'http_status', None)
         if stage not in ('model_request', 'response_parse', 'resource_guard'):
             stage, failure_code = 'model_request', 'MODEL_REQUEST_FAILED'
         if failure_code not in ('MODEL_HTTP_ERROR', 'MODEL_RESPONSE_INVALID',
                                 'RESOURCE_ADMISSION_DENIED', 'MODEL_REQUEST_FAILED',
-                                'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
+                                'SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'):
             failure_code = 'MODEL_REQUEST_FAILED' if stage == 'model_request' else (
                 'RESOURCE_ADMISSION_DENIED' if stage == 'resource_guard' else 'MODEL_RESPONSE_INVALID')
         failure = PilotStop('request stopped; no more inference; server cancellation/unload must be checked',

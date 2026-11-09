@@ -111,6 +111,7 @@ class BrowserGraniteDiagnosticsTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    @unittest.skipUnless(__import__("sys").platform != "win32", "POSIX model locking unavailable")
     def test_bounded_stage_diagnostics_survive_browser_api_state_and_renderer(self):
         for mode, expected in self.cases.items():
             with self.subTest(mode=mode):

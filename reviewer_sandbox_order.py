@@ -13,9 +13,10 @@ import os
 from pathlib import Path
 import re
 import stat
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
+from private_file_support import supports_private_files
 from sandbox_adapter import AdapterError
 
 DEFAULT_ORDER_PIN = Path.home() / '.secondbrain-secrets' / 'paypal-sandbox-order.json'
@@ -32,6 +33,12 @@ class ReviewerOrderPin:
     configuration_id: str
     # Keep the private PayPal reference out of repr()/diagnostic logs.
     order_id: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class VerifiedJudgeReceipt:
+    pin: ReviewerOrderPin
+    observed_at: str
 
 
 @contextmanager
@@ -57,6 +64,9 @@ def validate_order_id(value: str) -> str:
 
 
 def _check_parent(parent: Path) -> None:
+    if not supports_private_files():
+        raise AdapterError('Private Sandbox files require supported POSIX ownership and permissions',
+                           stage='configuration', failure_code='PRIVATE_FILES_UNSUPPORTED')
     info = parent.lstat()
     if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
             or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
@@ -148,12 +158,15 @@ def _unique_object(pairs):
     return result
 
 
-def validate_judge_order_binding(*, pin_path: Path, journal_path: Path | None = None) -> ReviewerOrderPin:
+def read_judge_order_receipt(*, pin_path: Path, journal_path: Path | None = None,
+                            require_completed_model=False) -> VerifiedJudgeReceipt:
     """Verify the dedicated judge pin matches its successful create/read journal.
 
     This is a local-only preflight. It refuses the legacy reviewer pin or any
     alternate profile and performs no credential access or network call.
     """
+    if type(require_completed_model) is not bool:
+        raise ValueError('Completed-model requirement must be explicit')
     selected = Path(pin_path)
     explicit_journal = journal_path is not None
     journal_path = Path(journal_path) if explicit_journal else DEFAULT_JUDGE_JOURNAL
@@ -227,4 +240,21 @@ def validate_judge_order_binding(*, pin_path: Path, journal_path: Path | None = 
             and timestamps_valid):
         raise AdapterError('Judge pin does not match a verified fresh create/read journal',
                            stage='configuration', failure_code='JUDGE_PIN_JOURNAL_MISMATCH')
-    return pin
+    if require_completed_model:
+        from local_model import MODEL, MODEL_DIGEST
+        if (journal['state'] != 'draft_pending_human_review'
+                or model.get('executionVerified') is not True
+                or model.get('expectedModel') != MODEL or model.get('expectedDigest') != MODEL_DIGEST):
+            raise AdapterError('Judge journal does not establish a completed pinned-model draft',
+                               stage='configuration', failure_code='JUDGE_MODEL_NOT_COMPLETED')
+    observed = datetime.fromisoformat(journal['orderObservedAt'].replace('Z', '+00:00'))
+    if observed.tzinfo is None:
+        raise AdapterError('Judge observation timestamp requires a timezone', stage='configuration',
+                           failure_code='JUDGE_JOURNAL_INVALID')
+    return VerifiedJudgeReceipt(pin, observed.astimezone(timezone.utc).isoformat(
+        timespec='seconds').replace('+00:00', 'Z'))
+
+
+def validate_judge_order_binding(*, pin_path: Path, journal_path: Path | None = None) -> ReviewerOrderPin:
+    """Validate a pin/journal pair without accessing credentials or PayPal."""
+    return read_judge_order_receipt(pin_path=pin_path, journal_path=journal_path).pin

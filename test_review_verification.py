@@ -8,6 +8,7 @@ from runtime_guard import PilotStop,StableSwapBaseline
 from sandbox_adapter import AdapterError
 from judge_sandbox_flow import main
 
+@unittest.skipUnless(__import__("private_file_support").supports_private_files(), "POSIX owner-private filesystem behavior unavailable")
 class ReviewVerificationTests(unittest.TestCase):
  def setUp(self):
   self.flow=fixture.FlowTests();self.flow.setUp();self.addCleanup(self.flow.tearDown)

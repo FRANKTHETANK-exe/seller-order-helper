@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import json
+import math
 from pathlib import Path
 import time
 from uuid import uuid4
@@ -24,6 +25,50 @@ SAFE_CODES = frozenset({'MODEL_TAG_LOOKUP_FAILED', 'MODEL_TAG_UNAVAILABLE',
     'ADMISSION_CHECK_FAILED', 'RESOURCE_ADMISSION_DENIED', 'MODEL_REQUEST_FAILED',
     'MODEL_HTTP_ERROR', 'MODEL_RESPONSE_INVALID', 'SELECTION_CONTRACT_REJECTED',
     'MODEL_SETUP_ERROR', 'MODEL_PLATFORM_UNSUPPORTED', 'SWAP_NONZERO', 'SWAP_BASELINE_INVALID', 'SWAP_BASELINE_DRIFT'})
+
+
+def _safe_failure_evidence(value):
+    """Keep numeric monitor evidence, never arbitrary exception/provider text."""
+    if type(value) is not dict:
+        return {}
+    result = {}
+    enums = {
+        'monitor_stage': SAFE_STAGES,
+        'monitor_failure_code': SAFE_CODES,
+        'monitor_phase': {'waiting', 'resources', 'loaded_model_health', 'guard'},
+        'transport_error_type': {'TimeoutError', 'RemoteDisconnected',
+            'ConnectionResetError', 'BrokenPipeError', 'OSError', 'PilotStop',
+            'HTTPException', 'JSONDecodeError', 'ConnectionAbortedError'},
+    }
+    for key, allowed in enums.items():
+        item = value.get(key)
+        if type(item) is str and item in allowed:
+            result[key] = item
+    bounds = {'elapsed': 86400, 'pressure_free_percent': 100,
+        'swap_used_mib': 2**40, 'memory_available_bytes': 2**60,
+        'memory_total_bytes': 2**60, 'disk_free_bytes': 2**60,
+        'load_1m': 2**20, 'model_vram_bytes': 2**60}
+    def observation(item):
+        if type(item) is not dict:
+            return {}
+        clean = {}
+        for key, maximum in bounds.items():
+            number = item.get(key)
+            if (type(number) in (int, float) and 0 <= number <= maximum
+                    and math.isfinite(number)):
+                clean[key] = number
+        scope = item.get('controller_queue_visibility')
+        if type(scope) is str and scope in {'checked', 'not_checked_standalone_mode'}:
+            clean['controller_queue_visibility'] = scope
+        return clean
+    last = observation(value.get('last_observation'))
+    if last:
+        result['last_observation'] = last
+    samples = value.get('resource_samples')
+    if type(samples) is list:
+        result['resource_samples'] = [clean for item in samples[-64:]
+                                      if (clean := observation(item))]
+    return result
 
 
 class LocalModelHeld(ValueError):
@@ -70,6 +115,11 @@ def request_facts(prompt):
                         break
                 if configuration_id is None:
                     raise ValueError('Prompt order does not match the active owner-only pin')
+            elif context.get('source') == 'saved_paypal_sandbox_receipt':
+                # Reuse the same explicit local pin for historical receipt facts.
+                # Keep its path and configuration identity out of model input.
+                from reviewer_sandbox_order import active_reviewer_pin_path
+                pin_path = active_reviewer_pin_path()
             facts = SandboxOrderFacts(order_id=context['order_id'],
                 order_status=context['order_status'], payment_truth=context['payment_truth'],
                 capture_status=context['capture_status'], currency=context['currency'],
@@ -163,6 +213,11 @@ class GraniteClient:
         self.last_run = {'status': 'admission_started', 'model': MODEL, 'model_digest': MODEL_DIGEST,
                          'request_id': uuid4().hex, 'inference_requests_attempted': 0,
                          'limits': dict(guard.GENERATION_OPTIONS),
+                         'request_budget_seconds': guard.request_budget_seconds(
+                             standalone_demo=self.standalone_demo),
+                         'swap_policy': ({'name': 'stable_swap_baseline', 'max_swap_mib': None}
+                             if self.stable_swap_policy is not None else guard.swap_policy(
+                                 standalone_demo=self.standalone_demo)),
                          'admission_profile': ('portable_standalone' if self.standalone_demo
                                                else 'secondbrain_controller'),
                          'controller_queue_visibility': ('not_checked_standalone_mode'
@@ -211,6 +266,9 @@ class GraniteClient:
                                             standalone_demo=self.standalone_demo,
                                             stable_swap_policy=self.stable_swap_policy)
                 except Exception as error:
+                    evidence = _safe_failure_evidence(getattr(error, 'evidence', None))
+                    if evidence:
+                        self.last_run['failure_evidence'] = evidence
                     stage = getattr(error, 'stage', None)
                     code = getattr(error, 'failure_code', None)
                     http_status = getattr(error, 'http_status', None)
@@ -262,7 +320,8 @@ class GraniteClient:
                             else guard.resources())
                 if self.stable_swap_policy is None:
                     guard.guard(snapshot, loaded,
-                                check_controller=not self.standalone_demo)
+                                check_controller=not self.standalone_demo,
+                                standalone_demo=self.standalone_demo)
                 else:
                     self.stable_swap_policy.check(snapshot, loaded,
                         check_controller=not self.standalone_demo)

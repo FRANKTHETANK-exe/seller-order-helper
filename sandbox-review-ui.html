@@ -1,90 +1,46 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Sandbox order review · Seller Order Helper</title>
-  <style>
-    :root { color-scheme: light; --ink:#202625; --muted:#5c6764; --line:#d6ded9; --paper:#f6f7f3; --card:#fff; --green:#245a46; --amber:#8a4d11; }
-    * { box-sizing:border-box }
-    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif }
-    main { width:min(100% - 32px, 760px); margin:36px auto 64px }
-    .eyebrow { text-transform:uppercase; letter-spacing:.1em; font-size:.75rem; font-weight:700; color:var(--green) }
-    h1 { margin:.25rem 0; font:600 clamp(1.8rem,5vw,2.55rem)/1.15 Georgia,serif; letter-spacing:-.025em }
-    .intro { max-width:62ch; color:var(--muted); margin:.6rem 0 1.5rem }
-    .notice { border:1px solid #d6b686; border-left:4px solid var(--amber); background:#fff8eb; padding:12px 16px; border-radius:4px; margin:18px 0 }
-    .notice strong { color:#683806 }
-    .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:20px; margin:14px 0 }
-    h2 { font-size:1.08rem; margin:0 0 12px }
-    dl { display:grid; grid-template-columns:minmax(130px, .65fr) 1fr; gap:7px 18px; margin:0 }
-    dt { color:var(--muted) } dd { margin:0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums }
-    .tag { display:inline-block; border:1px solid #bfd2c8; background:#edf5f0; color:#194a36; padding:2px 8px; border-radius:100px; font-size:.82rem; font-weight:650 }
-    .draft { min-height:96px; padding:16px; border:1px solid var(--line); background:#fbfcf9; border-radius:5px; white-space:pre-wrap }
-    textarea { display:block; width:100%; min-height:90px; margin:8px 0 4px; padding:10px; border:1px solid var(--line); border-radius:5px; color:var(--ink); font:inherit }
-    .digest { font: .78rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; color:var(--muted) }
-    button { appearance:none; border:1px solid var(--green); border-radius:5px; background:var(--green); color:white; padding:10px 15px; font:inherit; font-weight:600; cursor:pointer }
-    button.secondary { background:white; color:var(--green) }
-    button:disabled { opacity:.5; cursor:not-allowed }
-    button:focus-visible { outline:3px solid #d08b34; outline-offset:3px }
-    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px }
-    .muted { color:var(--muted); font-size:.92rem }
-    #status { min-height:1.6em; color:var(--green); font-weight:600 }
-    .foot { border-top:1px solid var(--line); margin-top:24px; padding-top:16px; color:var(--muted); font-size:.9rem }
-    @media (max-width:520px) { main { margin-top:22px } .panel { padding:16px } dl { grid-template-columns:1fr; gap:1px } dd { margin:0 0 8px } .actions button { width:100% } }
-  </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+<title>Order questions · Seller Order Helper</title>
+<style>
+:root{color-scheme:light;--ink:#202d3c;--muted:#637083;--line:#dfe5ec;--blue:#185ca8;--paper:#f3f6f9;--amber:#86551d}
+html{scrollbar-gutter:stable}*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.topbar{background:#fff;border-bottom:1px solid var(--line)}.topbar-inner{max-width:1120px;margin:auto;padding:20px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{font-weight:700;font-size:17px;letter-spacing:-.025em}.workspace-label{color:var(--muted);font-size:13px}
+main{max-width:1120px;margin:0 auto;padding:36px 28px 48px}.page-heading{margin-bottom:26px}h1{font-size:28px;line-height:1.25;font-weight:650;letter-spacing:-.035em;margin:0}.workbench{display:grid;grid-template-columns:286px minmax(0,1fr);gap:24px;align-items:start}.panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:26px}.order-panel{padding:23px}h2{font-size:17px;font-weight:650;letter-spacing:-.015em;margin:0 0 18px}.order-panel h2{font-size:15px;margin-bottom:22px}.amount{font-size:31px;line-height:1.2;font-weight:600;letter-spacing:-.035em;margin-bottom:16px;font-variant-numeric:tabular-nums}.order-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:20px}.tag{color:var(--amber);background:#faf2e8;padding:3px 8px;border-radius:5px;font-weight:600}.payment-summary{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:17px 0;margin-bottom:17px}.payment-summary strong{display:block;font-size:14px;font-weight:600}.payment-summary p{font-size:13px;color:var(--muted);margin:6px 0 0}.source-note{font-size:12px;color:var(--muted);margin:0 0 15px}.source-note:empty{display:none}dl{margin:0;font-size:12px}dt{color:var(--muted);margin-top:13px}dd{margin:2px 0 0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.live-panel{border-top:1px solid var(--line);padding-top:17px;margin-top:18px}.live-panel button{width:100%}.live-panel p{font-size:12px;color:var(--muted);margin:8px 0 0}
+label{display:block;font-weight:600;font-size:14px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}textarea{display:block;width:100%;min-height:112px;resize:vertical;margin:0 0 8px;padding:14px 15px;border:1px solid #b9c5d2;border-radius:6px;background:#fff;color:var(--ink);font:inherit;line-height:1.5}textarea:disabled{background:#f8fafc;color:#586677;border-color:var(--line)}.hint{font-size:12px;color:var(--muted);margin:0}.compose-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:20px}button{font:600 14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:11px 16px;border:1px solid var(--blue);border-radius:6px;background:var(--blue);color:#fff;cursor:pointer;min-height:44px}button.secondary{background:#fff;color:var(--blue);border-color:#bfcbd8}button.text-button{background:transparent;color:var(--blue);border-color:transparent;padding:8px 0;font-weight:500;font-size:12px}button:not(:disabled):hover{background:#124b8c;border-color:#124b8c}button.secondary:not(:disabled):hover{background:#f1f5fa;color:var(--ink);border-color:#9ba9b6}button.text-button:not(:disabled):hover{background:transparent;color:#173f6a;border-color:transparent;text-decoration:underline;text-underline-offset:3px}button:disabled{opacity:.45;cursor:not-allowed}:focus-visible{outline:3px solid #7fa6cb;outline-offset:3px}
+.response-section{border-top:1px solid var(--line);margin-top:28px;padding-top:24px}.response-heading{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px}.response-heading h2{margin:0}.response-label{font-size:12px;color:var(--muted);white-space:nowrap}.response{white-space:pre-wrap;margin:0;line-height:1.75;font-size:15px;min-height:108px}.response:not(.empty){background:#f5f8fc;border:1px solid #e1e8f0;border-radius:6px;padding:18px}.response.empty{color:var(--muted)}.seller-guidance{border-left:3px solid #b7c8d8;padding:2px 0 2px 16px;margin-top:22px}.seller-guidance h2{font-size:14px;margin:0 0 6px}.seller-guidance p{margin:0;font-size:13px;line-height:1.65;white-space:pre-line}#seller-attention{color:#8b461b;font-weight:600;margin-bottom:6px}#seller-attention:empty{display:none}.session-row{margin-top:21px;display:flex;align-items:center;justify-content:space-between;gap:20px}.session-row p{font-size:12px;color:var(--muted);margin:0;flex:1}.session-row button{flex-shrink:0}.technical{border-top:1px solid var(--line);margin-top:12px;padding-top:10px;font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:8px 0;font-size:12px}.technical p{margin:8px 0;overflow-wrap:anywhere}
+@media(max-width:760px){main{padding:26px 16px}.topbar-inner{padding:18px 16px}.workbench{grid-template-columns:1fr;gap:18px}.order-panel{padding:20px}.order-panel h2{margin-bottom:16px}.amount{font-size:28px}.order-line{margin-bottom:12px}.payment-summary{padding:13px 0}.panel{padding:21px}h1{font-size:25px}.page-heading{margin-bottom:20px}}
+@media(max-width:480px){.workspace-label{font-size:12px}.brand{font-size:15px}.response-heading{gap:10px}textarea{font-size:16px}.session-row{gap:12px;align-items:flex-start}summary{min-height:44px}.compose-actions{gap:12px}}
+</style>
 </head>
 <body>
+<header class="topbar"><div class="topbar-inner"><span class="brand">Seller Order Helper</span><span class="workspace-label">PayPal Sandbox</span></div></header>
 <main>
-  <p class="eyebrow">Seller Order Helper · private local review</p>
-  <h1>Sandbox order review</h1>
-  <p class="intro" id="model-intro">This page shows saved sandbox evidence. It cannot contact PayPal or send anything.</p>
-  <div class="notice" id="admission-scope" hidden><strong>Standalone guard limits.</strong> This setup checks only the local Ollama model and computer resources; it does not inspect Second Brain or other task queues. Use only on a computer you have confirmed is idle for AI work.</div>
-  <section class="panel" id="live-refresh-panel" aria-labelledby="refresh-title" hidden>
-    <h2 id="refresh-title">One-time PayPal sandbox refresh</h2>
-    <p class="muted">The saved receipt is historical. Refresh reads only the existing order in the reviewer-owned Sandbox pin. The stored Sandbox credentials are sent to PayPal for authentication; this page has no create, approve, capture, or send action. Draft generation stays disabled until the read passes validation.</p>
-    <div class="actions"><button id="refresh" type="button">Refresh pinned sandbox order</button></div>
-    <p id="refresh-state" class="muted" role="status" aria-live="polite">No live read has been requested.</p>
-  </section>
-  <div class="notice"><strong>Payment is not confirmed by this view.</strong> The displayed order status is CREATED. The available facts do not show buyer approval or a captured payment.</div>
-
-  <section class="panel" aria-labelledby="facts-title">
-    <h2 id="facts-title">Recorded order facts</h2>
-    <dl>
-      <dt>Order</dt><dd id="order-id">Loading…</dd>
-      <dt>Environment</dt><dd id="environment">Loading…</dd>
-      <dt>Order status</dt><dd><span class="tag" id="order-status">Loading…</span></dd>
-      <dt>Payment truth</dt><dd id="payment-truth">Loading…</dd>
-      <dt>Capture</dt><dd id="capture-status">Loading…</dd>
-      <dt>Amount</dt><dd id="amount">Loading…</dd>
-      <dt>Evidence</dt><dd id="source">Loading…</dd>
-      <dt id="time-label">Observed</dt><dd id="observed-at">Loading…</dd>
-    </dl>
-    <p class="muted" id="facts-source-note">This is a saved receipt snapshot. Refreshing it from PayPal is not available from this page.</p>
-  </section>
-
-  <section class="panel" aria-labelledby="draft-title">
-    <h2 id="draft-title">Internal Sandbox review draft</h2>
-    <p class="muted">This is an internal test draft. Do not send it to a buyer.</p>
-    <label for="buyer-question">Buyer question (use synthetic demo text)</label>
-    <textarea id="buyer-question" maxlength="500" aria-describedby="question-hint">Has my payment gone through?</textarea>
-    <p class="muted" id="question-hint">Up to 500 characters. A local model may classify the question into a fixed intent; the app writes the response from validated facts or synthetic example data. The question and draft stay in this local session.</p>
-    <p class="muted" id="question-intent" aria-live="polite"></p>
-    <p id="draft" class="draft" aria-live="polite">No draft generated yet.</p>
-    <p class="muted" id="model-info">No model has been run.</p>
-    <p class="muted" id="granite-diagnostic" role="status" aria-live="polite"></p>
-    <p class="digest" id="digest"></p>
-    <p id="review-state" class="muted">Human review is pending. Nothing has been sent.</p>
-    <div class="actions">
-      <button id="generate" type="button" disabled>Generate local draft</button>
-      <button id="review" class="secondary" type="button" disabled>I reviewed this exact draft</button>
-    </div>
-    <p id="status" role="status" aria-live="polite">Loading local session facts…</p>
-    <button id="reload-state" class="secondary" type="button">Reload session status</button>
-    <p class="muted">Reload checks this local session only. It does not repeat an order read, generate a draft, or send anything. If the server closed, its in-memory review state is unavailable.</p>
-  </section>
-
-  <footer class="foot" id="model-footer">The draft uses only the saved receipt facts. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.</footer>
+<div class="page-heading"><h1>Order questions</h1></div>
+<div class="workbench">
+<aside class="panel order-panel" aria-labelledby="facts-title">
+<h2 id="facts-title">Order details</h2><div id="amount" class="amount">Loading…</div>
+<div class="order-line"><span id="environment">Loading…</span><span class="tag" id="order-status">Loading…</span></div>
+<div class="payment-summary"><strong id="payment-truth">Loading…</strong><p>No buyer approval or captured payment recorded.</p></div>
+<p id="facts-source-note" class="source-note"></p>
+<dl><dt>Order reference</dt><dd id="order-id">Loading…</dd><dt id="time-label">Checked</dt><dd id="observed-at">Loading…</dd><dt>Source</dt><dd id="source">Loading…</dd><dt>Capture</dt><dd id="capture-status">Loading…</dd></dl>
+<div class="live-panel" id="live-refresh-panel" hidden><button id="refresh" class="secondary" type="button" disabled>Check order</button><p id="refresh-state">Checks this order once in PayPal Sandbox.</p></div>
+</aside>
+<section class="panel" aria-labelledby="question-title">
+<h2 id="question-title">Customer question</h2>
+<label class="sr-only" for="buyer-question">Customer question</label><textarea id="buyer-question" maxlength="500" aria-describedby="question-hint">Has my payment gone through?</textarea>
+<p id="question-hint" class="hint">Up to 500 characters.</p>
+<div class="compose-actions"><button id="generate" type="button" disabled>Generate response</button><button id="new-question" class="text-button" type="button" hidden disabled>New question</button></div>
+<section class="response-section" aria-labelledby="response-title"><div class="response-heading"><h2 id="response-title">Message response</h2><span class="response-label">Local only</span></div>
+<p id="draft" class="response empty" aria-live="polite" tabindex="-1">Your response will appear here.</p>
+<section id="seller-guidance" class="seller-guidance" hidden aria-labelledby="seller-guidance-title"><h2 id="seller-guidance-title">Next step</h2><p id="seller-attention" role="status"></p><p id="seller-next-step"></p></section>
+</section>
+<div class="session-row"><p id="status" role="status" aria-live="polite">Loading order…</p><button id="reload-state" class="text-button" type="button">Check status</button></div>
+<details id="session-details" class="technical" hidden><summary>Error details</summary><p id="granite-diagnostic"></p><p id="refresh-diagnostic"></p></details>
+</section>
+</div>
 </main>
 <script>
 (() => {
@@ -92,14 +48,38 @@
   const put = (id, value) => { byId(id).textContent = value; };
   const status = text => put('status', text);
   let current = null;
+  let busy = false;
   function lockActions() {
-    ['generate', 'review', 'refresh'].forEach(id => { byId(id).disabled = true; });
-    byId('buyer-question').disabled = true;
-    byId('reload-state').disabled = true;
+    ['generate', 'refresh', 'new-question', 'reload-state', 'buyer-question'].forEach(id => { byId(id).disabled = true; });
+  }
+  function orderExpired(state) {
+    return !!state && ((state.completed_flow && !state.live_facts_fresh)
+      || (state.live_refresh_enabled && state.live_refresh_status === 'stale'));
+  }
+  function generationError(diagnostic) {
+    const messages = {
+      MODEL_REQUEST_FAILED:'Response generation was interrupted.',
+      MODEL_HTTP_ERROR:'The response service is unavailable.',
+      MODEL_RESPONSE_INVALID:'The response could not be validated.',
+      SELECTION_CONTRACT_REJECTED:'The response could not be validated.',
+      RESOURCE_ADMISSION_DENIED:'Response generation is unavailable on this computer.',
+      SWAP_NONZERO:'Response generation is unavailable on this computer.',
+      SWAP_BASELINE_INVALID:'Response generation is unavailable on this computer.',
+      SWAP_BASELINE_DRIFT:'Response generation stopped because memory use changed.'
+    };
+    return messages[diagnostic.code] || 'Couldn’t generate a response.';
+  }
+  function sessionStatus(state) {
+    if (orderExpired(state)) return 'Order check expired';
+    if (state.generation_failure) return generationError(state.generation_failure);
+    if (state.live_refresh_status === 'failed') return 'Couldn’t verify the order.';
+    if (state.draft) return 'Response ready.';
+    if (state.generation_attempted) return 'No response is available.';
+    if (state.live_refresh_enabled && !state.live_facts_fresh) return 'Check the order to continue.';
+    return '';
   }
   async function reloadState() {
     lockActions();
-    byId('reload-state').disabled = true;
     try {
       const response = await fetch('/api/state', {cache:'no-store'});
       if (!response.ok) throw new Error('state unavailable');
@@ -107,157 +87,155 @@
       return true;
     } catch (_) {
       lockActions();
-      status('Session status is unavailable. Actions are locked; reload session status before continuing. No operation was repeated.');
+      status('Status unavailable. Check status to continue.');
       return false;
     } finally { byId('reload-state').disabled = false; }
   }
+  function requestCorrection(message) {
+    // Only known local validation messages may become seller guidance.
+    // Never echo arbitrary service errors or provider response text.
+    if (['Enter one question of at most 500 characters.',
+         'Enter a question of 1–500 characters.'].includes(message)) return 'question_length';
+    if (message === 'Enter a buyer question as text.') return 'question_text';
+    if (message === 'This question changed in another tab. Reload session status before continuing.') return 'question_changed';
+    return null;
+  }
   async function reconcileFailure(error) {
-    if (await reloadState()) status(`${error.message} Session status reloaded; inspect it before continuing. No operation was repeated.`);
+    if (await reloadState()) {
+      const message = sessionStatus(current);
+      const correction = error && error.correction;
+      const blocked = orderExpired(current) || current.generation_failure
+        || current.live_refresh_status === 'failed';
+      if (!blocked && correction === 'question_changed') {
+        status(current.draft
+          ? 'The question changed in another tab. The current response is shown below.'
+          : current.generation_attempted
+            ? 'The question changed in another tab. Check status for its response.'
+            : 'The question changed in another tab. Enter your question again.');
+        if (!byId('buyer-question').disabled) byId('buyer-question').focus();
+      } else if (!blocked && !current.generation_attempted
+          && (correction === 'question_length' || correction === 'question_text')) {
+        status(correction === 'question_length'
+          ? 'Shorten your question and try again.' : 'Enter a customer question.');
+        byId('buyer-question').focus();
+      } else status(message || 'Status recovered. No retry was made.');
+    }
   }
   async function call(path, data) {
+    if (['/api/generate', '/api/new-question'].includes(path)
+        && current && Number.isInteger(current.question_version)) {
+      data = {...data, question_version: current.question_version};
+    }
     const response = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'The local request was stopped.');
+    if (!response.ok) {
+      const error = new Error('Request stopped');
+      error.correction = requestCorrection(result && result.error);
+      throw error;
+    }
     return result;
   }
   function render(state) {
+    const firstLoad = current === null;
+    const newQuestion = current && current.question_version !== state.question_version;
     current = state;
+    if (newQuestion && !state.generation_attempted) byId('buyer-question').value = '';
+    if (state.completed_flow && typeof state.completed_buyer_question === 'string') {
+      byId('buyer-question').value = state.completed_buyer_question;
+    } else if ((firstLoad || newQuestion) && state.generation_attempted) {
+      byId('buyer-question').value = '';
+      byId('buyer-question').placeholder = 'Question from earlier in this session';
+    } else if (!state.generation_attempted) {
+      byId('buyer-question').placeholder = 'Enter the customer’s question';
+    }
     byId('reload-state').disabled = false;
-    byId('admission-scope').hidden = !state.standalone_demo;
     byId('live-refresh-panel').hidden = !state.live_refresh_enabled;
+    byId('refresh').disabled = !state.live_refresh_enabled || state.live_refresh_status !== 'not_requested';
     put('order-id', state.order_id);
-    put('environment', state.source === 'synthetic_order_fixture' ? 'Synthetic PayPal-style example' : 'PayPal sandbox');
-    put('time-label', state.source === 'synthetic_order_fixture' ? 'Example time' : 'Observed');
-    put('order-status', state.order_status);
-    put('payment-truth', state.payment_truth);
+    const sample = state.source === 'synthetic_order_fixture';
+    const saved = state.source === 'saved_paypal_sandbox_receipt';
+    put('environment', sample ? 'Sample order' : 'Sandbox order');
+    put('time-label', sample ? 'Example time' : saved ? 'Recorded' : 'Checked');
+    put('order-status', state.order_status === 'CREATED' ? 'Created' : state.order_status);
+    put('payment-truth', state.payment_truth === 'CREATED_NOT_APPROVED' ? 'Payment not confirmed' : state.payment_truth);
     put('capture-status', state.capture_status || 'None recorded');
     put('amount', `${state.currency} ${state.amount}`);
-    put('source', state.source === 'synthetic_order_fixture' ? 'Synthetic offline example' : state.source === 'saved_paypal_sandbox_receipt' ? 'Saved PayPal sandbox receipt' : 'Live sandbox read');
+    put('source', sample ? 'Sample data' : saved ? 'Saved Sandbox record' : 'PayPal Sandbox');
     put('observed-at', state.observed_at);
-    if (state.live_refresh_enabled) {
-      const readState = state.live_refresh_status;
-      byId('refresh').disabled = readState !== 'not_requested';
-      if (readState === 'succeeded' && state.live_facts_fresh) {
-        put('refresh-state', `Live order read and validated at ${state.observed_at}. Generate is available for up to five minutes.`);
-        put('facts-source-note', 'These facts came from one read-only PayPal sandbox lookup of the known order. The timestamp is the read observation time.');
-      } else if (readState === 'failed') {
-        const failure = state.live_refresh_failure || {};
-        const counts = failure.call_counts || state.live_refresh_call_counts;
-        const calls = counts
-          ? ` OAuth attempts: ${counts.oauth_attempts}; pinned-order GET attempts: ${counts.pinned_order_get_attempts}.`
-          : ' Safe request counts are unavailable.';
-        const status = Number.isInteger(failure.http_status) ? ` HTTP ${failure.http_status}.` : '';
-        put('refresh-state', `Refresh stopped (${failure.stage || 'live_read'} · ${failure.code || 'LIVE_READ_REJECTED'}).${status}${calls} No AI draft is available.`);
-        put('facts-source-note', state.source === 'synthetic_order_fixture' ? 'The live read did not validate. These displayed facts are synthetic example data, not current order state.' : 'The live read did not validate. These displayed facts are historical, not current order state.');
-      } else if (readState === 'stale') {
-        put('refresh-state', 'The live read is older than five minutes. Restart this session for a new one-time read; no draft can be generated from stale facts.');
-        put('facts-source-note', 'This live read is stale; do not treat it as current.');
-      } else {
-        put('refresh-state', 'No live read yet. Draft generation is locked until the pinned-order read succeeds.');
-        put('facts-source-note', state.source === 'synthetic_order_fixture' ? 'These displayed facts are synthetic example data until a successful live read replaces them.' : 'These displayed facts are historical until a successful live read replaces them.');
-      }
-    } else if (state.source === 'synthetic_order_fixture') {
-      put('facts-source-note', 'This is synthetic example data. No PayPal order was read for this offline session.');
-    }
+    put('facts-source-note', saved ? 'Historical order record' : '');
+    put('refresh-state', state.live_refresh_status === 'not_requested'
+      ? 'Checks this order once in PayPal Sandbox.'
+      : state.live_refresh_status === 'succeeded' && state.live_facts_fresh
+        ? 'Order checked' : 'Order check used');
     const draft = state.draft;
-    put('draft', draft ? draft.text : 'No draft generated yet.');
-    put('digest', draft ? `Draft digest: ${draft.digest}` : '');
-    const intentLabels = {payment_status:'payment status',approval_needed:'approval requirement',delivery_status:'delivery status',refund_question:'refund question',human_follow_up:'needs human follow-up'};
-    put('question-intent', draft ? `Question interpreted as: ${intentLabels[draft.question_intent] || 'needs human follow-up'}.` : '');
-    const stubMode = state.client_kind === 'stub';
-    const graniteMode = state.client_kind === 'granite';
-    const liveMode = state.live_refresh_enabled;
-    const staleLiveRead = liveMode && state.live_refresh_status === 'stale'
-      && state.source !== 'saved_paypal_sandbox_receipt';
-    if (stubMode) {
-      put('model-info', state.generation_attempted
-        ? 'Offline template · no AI inference · draft generated'
-        : 'Offline template · no AI inference · not run yet');
-      put('model-intro', liveMode
-        ? (staleLiveRead
-          ? 'A fixed-template draft, if present, came from an earlier validated Sandbox read that is now stale. Treat it as historical evidence; no new draft or review is available in this session. This page cannot change or send anything.'
-          : state.live_facts_fresh
-          ? 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the validated Sandbox read shown above. The read is historical after five minutes. This page cannot change or send anything.'
-          : 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the saved receipt unless a fresh Sandbox read is shown above. This page cannot change or send anything.')
-        : state.source === 'synthetic_order_fixture'
-          ? 'This offline example uses synthetic order facts and fixed wording, not AI or a PayPal lookup. Review acknowledgment lasts only until this local server closes. This page cannot send anything.'
-          : 'The draft uses fixed reviewed wording, not AI. Its factual sentence comes from the saved receipt. Review acknowledgment lasts only until this local server closes. This page cannot contact PayPal or send anything.');
-      put('model-footer', liveMode
-        ? 'Offline template mode can use a validated one-time read of the pinned Sandbox order, but runs no model. The page offers no order creation, approval, capture, fulfillment, or message-send controls.'
-        : 'Offline template mode runs no model and makes no PayPal request. Review acknowledgment lasts only until this local server closes. The page offers no approval, capture, fulfillment, or message-send controls.');
-    } else if (graniteMode) {
-      put('model-info', state.draft
-        ? `Granite local inference used · ${state.model_name} · one attempt for this session`
-        : (state.generation_attempted
-          ? `Granite selected · ${state.model_name} · attempt stopped without a draft`
-          : `Granite selected · ${state.model_name} · no inference run yet`));
-      put('model-intro', liveMode
-        ? (staleLiveRead
-          ? (state.draft
-            ? 'A bounded Granite inference produced this draft from an earlier validated pinned-order read that is now stale. Treat it as historical evidence; review is disabled. This page cannot change or send anything.'
-            : 'An earlier validated pinned-order read is now stale. No Granite draft can be generated from it in this session. This page cannot change or send anything.')
-          : state.draft
-          ? 'A bounded Granite inference has produced this draft from the validated pinned-order read. Inspect it and record review of that exact draft. This page can read that known sandbox order but cannot change or send anything.'
-          : 'Granite is selected. In live-refresh mode, the saved receipt is historical until the pinned-order read passes validation. After generation, inspect the draft and record review of that exact draft. The page cannot change or send anything.')
-        : (state.source === 'synthetic_order_fixture'
-          ? 'This offline example uses synthetic order facts. Granite may select constrained wording, but no PayPal lookup or message send is available.'
-          : state.draft
-          ? 'A bounded Granite inference has produced this draft from the saved sandbox evidence. Inspect it and record review of that exact draft. This page cannot contact PayPal or send anything.'
-          : 'Granite is selected for this local session. No inference has run yet. After generation, inspect the draft and record review of that exact draft. This page cannot contact PayPal or send anything.'));
-      put('model-footer', liveMode
-        ? 'Granite selects an allowed wording style; the app composes the factual sentence only from the validated pinned-order read and its observed timestamp. The only order-data request is one read-only GET of that known order. Review acknowledgment lasts only until this server closes; there are no order creation, approval, capture, fulfillment, or message-send controls.'
-        : (state.draft
-          ? 'Granite selects an allowed wording style; the app composes the factual sentence only from the saved receipt. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.'
-          : 'If generated, Granite selects only an allowed wording style and the app composes the factual sentence from saved receipt facts. No model execution is claimed until a draft appears. Review acknowledgment lasts only until this local server closes. There are no approval, capture, fulfillment, or message-send controls.'));
-    } else {
-      put('model-info', 'Model status unavailable; no inference claim is made.');
-      put('model-intro', 'Model status is unavailable. This page shows saved sandbox evidence only and cannot contact PayPal or send anything.');
-      put('model-footer', 'Model execution is unverified; no inference claim is made. The page cannot approve, capture, fulfill, or send messages.');
-    }
+    put('draft', draft ? draft.text : state.generation_attempted ? 'No response available.' : 'Your response will appear here.');
+    byId('draft').classList.toggle('empty', !draft);
+    byId('seller-guidance').hidden = !draft || !draft.seller_next_step;
+    put('seller-next-step', draft ? draft.seller_next_step || '' : '');
+    const attentionLabels = {duplicate_charge:'Possible duplicate charge', amount_mismatch:'Different amount reported', unrecognized_charge:'Unrecognized charge reported'};
+    const attention = draft && Array.isArray(draft.seller_attention) ? draft.seller_attention : [];
+    put('seller-attention', attention.map(flag => attentionLabels[flag] || 'Customer issue needs attention').join(' · '));
     const diagnostic = state.generation_failure;
     if (diagnostic) {
-      const attempted = diagnostic.request_attempted === null ? 'unknown'
-        : diagnostic.request_attempted ? 'yes' : 'no';
-      const count = diagnostic.attempt_count === null ? 'unknown' : diagnostic.attempt_count;
+      const attempted = diagnostic.request_attempted === true ? 'yes' : diagnostic.request_attempted === false ? 'no' : 'unknown';
+      const count = Number.isInteger(diagnostic.attempt_count) ? diagnostic.attempt_count : 'unknown';
       const http = Number.isInteger(diagnostic.http_status) ? ` · HTTP ${diagnostic.http_status}` : '';
-      put('granite-diagnostic', `Granite stopped · ${diagnostic.stage} / ${diagnostic.code} · request attempted: ${attempted} · count: ${count}${http}. No retry was made.`);
-    } else {
-      put('granite-diagnostic', '');
-    }
-    put('review-state', state.review_status === 'reviewed_not_sent'
-      ? 'Reviewed in this local session. Not sent; payment remains CREATED_NOT_APPROVED.'
-      : (draft ? 'Human review pending. This draft is not sent.' : 'Human review is pending. Nothing has been sent.'));
-    const liveReady = !state.live_refresh_enabled
-      || (state.live_refresh_status === 'succeeded' && state.live_facts_fresh);
+      put('granite-diagnostic', `${diagnostic.code} · ${diagnostic.stage}${http}. Generation request attempted: ${attempted}; attempts: ${count}. No retry was made.`);
+    } else put('granite-diagnostic', '');
+    const failure = state.live_refresh_failure;
+    if (failure) {
+      const counts = failure.call_counts || state.live_refresh_call_counts;
+      const calls = counts ? ` Authentication attempts: ${counts.oauth_attempts}; order-read attempts: ${counts.pinned_order_get_attempts}.` : ' Request counts unavailable.';
+      const http = Number.isInteger(failure.http_status) ? ` · HTTP ${failure.http_status}` : '';
+      put('refresh-diagnostic', `${failure.code || 'LIVE_READ_REJECTED'} · ${failure.stage || 'live_read'}${http}.${calls} No retry was made.`);
+    } else put('refresh-diagnostic', '');
+    byId('session-details').hidden = !diagnostic && !failure;
+    const liveReady = state.completed_flow ? state.live_facts_fresh
+      : (!state.live_refresh_enabled || (state.live_refresh_status === 'succeeded' && state.live_facts_fresh));
     byId('buyer-question').disabled = !!state.generation_attempted;
-    byId('generate').disabled = state.generation_attempted || !liveReady;
-    byId('review').disabled = !draft || state.review_status === 'reviewed_not_sent' || !liveReady;
+    byId('generate').disabled = !!state.generation_attempted || !liveReady;
+    byId('generate').hidden = !!state.completed_flow;
+    byId('new-question').hidden = !state.new_question_enabled;
+    byId('new-question').disabled = !state.new_question_enabled || !draft || !!state.generation_failure;
+    status(sessionStatus(state));
   }
   byId('reload-state').addEventListener('click', async () => {
-    status('Checking this local session only…');
-    if (await reloadState()) status('Session status reloaded. No order read, draft generation, or message was repeated.');
+    if (busy || byId('reload-state').disabled) return;
+    busy = true;
+    status('Checking status…');
+    try { await reloadState(); } finally { busy = false; }
   });
   byId('refresh').addEventListener('click', async () => {
+    if (busy || byId('refresh').disabled) return;
+    busy = true;
     lockActions();
-    put('refresh-state', 'Reading the one known PayPal sandbox order…');
-    try {
-      render(await call('/api/refresh', {}));
-      status('Sandbox read passed validation.');
-    } catch (error) { await reconcileFailure(error); }
+    status('Checking order…');
+    try { render(await call('/api/refresh', {})); }
+    catch (error) { await reconcileFailure(error); }
+    finally { busy = false; }
   });
   byId('generate').addEventListener('click', async () => {
+    if (busy || byId('generate').disabled) return;
     const question = byId('buyer-question').value;
+    if (!question.trim()) { status('Enter a customer question.'); byId('buyer-question').focus(); return; }
+    busy = true;
     lockActions();
-    status('Generating one bounded local draft…');
-    try { render(await call('/api/generate', {question})); status('Draft ready for inspection.'); }
-    catch (error) { await reconcileFailure(error); }
+    status('Generating response…');
+    try {
+      render(await call('/api/generate', {question}));
+      if (current.draft) byId('draft').focus();
+    } catch (error) { await reconcileFailure(error); }
+    finally { busy = false; }
   });
-  byId('review').addEventListener('click', async () => {
-    if (!current || !current.draft) return;
-    const digest = current.draft.digest;
+  byId('new-question').addEventListener('click', async () => {
+    if (busy || byId('new-question').disabled || !current || !current.new_question_enabled) return;
+    busy = true;
     lockActions();
-    try { render(await call('/api/review', {digest})); status('Review recorded locally. Nothing was sent.'); }
-    catch (error) { await reconcileFailure(error); }
+    try {
+      render(await call('/api/new-question', {}));
+      byId('buyer-question').focus();
+    } catch (error) { await reconcileFailure(error); }
+    finally { busy = false; }
   });
   lockActions();
   reloadState();

@@ -87,8 +87,14 @@ def _safe_transport_exception(error):
     return "Exception", "SANDBOX_NETWORK_ERROR"
 
 
+from private_file_support import supports_private_files
+
+
 def load_owner_sandbox_credentials(path: Path | None = None) -> SandboxCredentials:
     """Read the exact owner-only sandbox file in process without exposing values."""
+    if not supports_private_files():
+        raise AdapterError('Private Sandbox files require supported POSIX ownership and permissions',
+                           stage='configuration', failure_code='PRIVATE_FILES_UNSUPPORTED')
     path = path or (Path.home() / '.secondbrain-secrets' / 'paypal-sandbox.env')
     try:
         parent = path.parent.lstat()

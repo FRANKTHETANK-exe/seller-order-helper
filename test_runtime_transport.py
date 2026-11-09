@@ -95,7 +95,7 @@ class RuntimeTransportTests(unittest.TestCase):
             def close(self):pass
         with patch('runtime_guard.http.client.HTTPConnection',Connection):
             result=guard.generate('granite4.2:3b',prompt,response_format=schema)
-        self.assertEqual(Connection.constructor,(('127.0.0.1',11434),{'timeout':15}))
+        self.assertEqual(Connection.constructor,(('127.0.0.1',11434),{'timeout':guard.LIMITS['request_seconds']}))
         method,path,payload,headers=Connection.sent
         self.assertEqual((method,path),('POST','/api/generate'))
         self.assertEqual(payload['format'],schema)

@@ -8,16 +8,31 @@ from pathlib import Path
 import re
 import stat
 
+from private_file_support import supports_private_files
 from sandbox_adapter import (AdapterError, SandboxAdapter, SandboxOAuthClient,
                              SafeSandboxCallCounts, UrllibSandboxTransport,
                              load_owner_sandbox_credentials)
-from reviewer_sandbox_order import read_order_pin
+from reviewer_sandbox_order import read_order_pin, read_judge_order_receipt
 
 KNOWN_ORDER_ID = 'REDACTEDORDERID'
 KNOWN_REQUEST_ID = 'REDACTED_SANDBOX_REQUEST_ID'
 RECEIPT_PATH = Path(__file__).resolve().parent / 'evidence' / 'offline-synthetic-receipt.json'
 PRIVATE_RUNTIME_PROFILE = Path(__file__).resolve().parent / 'data' / 'private-sandbox-runtime.json'
 REDACTED_ORDER_IDS = frozenset({'REDACTEDORDERID', 'REDACTED_ORDER_ID', 'ORDER_ID_REDACTED'})
+
+
+def read_saved_judge_order_facts(*, pin_path: Path, journal_path: Path) -> dict:
+    """Load historical facts from a validated successful journal, without a refresh.
+
+    The validator reads the journal once and checks the identity, USD 10 amount,
+    CREATED status, absent capture and all three successful HTTP response stages.
+    The returned timestamp is the original read time, never the current time.
+    """
+    receipt = read_judge_order_receipt(pin_path=pin_path, journal_path=journal_path)
+    return {'order_id': receipt.pin.order_id, 'order_status': 'CREATED',
+            'payment_truth': 'CREATED_NOT_APPROVED', 'capture_status': None,
+            'currency': 'USD', 'amount': '10.00', 'observed_at': receipt.observed_at,
+            'source': 'saved_paypal_sandbox_receipt'}
 
 
 def read_recorded_evidence(path: Path = RECEIPT_PATH) -> dict:
@@ -59,6 +74,9 @@ def read_recorded_evidence(path: Path = RECEIPT_PATH) -> dict:
 
 def read_private_current_order(*, profile_path: Path = PRIVATE_RUNTIME_PROFILE) -> dict:
     """Read a digest-pinned owner-private sandbox receipt; never store its ID in the profile."""
+    if not supports_private_files():
+        raise AdapterError('Private Sandbox files require supported POSIX ownership and permissions',
+                           stage='configuration', failure_code='PRIVATE_FILES_UNSUPPORTED')
     try:
         if profile_path.is_symlink() or profile_path.stat().st_size > 2048:
             raise AdapterError('Private sandbox runtime profile is unavailable')
